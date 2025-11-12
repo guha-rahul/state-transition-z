@@ -72,6 +72,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: zig fmt --check .
 
+      - name: Run hashing tests
+        run: |
+          zig build test:hashing
+
+      - name: Run persistent_merkle_tree tests
+        run: |
+          zig build test:persistent_merkle_tree
+
+      - name: Run ssz tests
+        run: |
+          zig build test:ssz
+
       - name: Run hex tests
         run: |
           zig build test:hex
@@ -90,3 +102,48 @@ jobs:
       - name: Run Int Tests
         run: |
           zig build test:int
+
+  spec-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+          cache-key: ubuntu-latest-${{ env.ZIG_VERSION }}
+
+      - name: Cache spec tests
+        id: spec-tests
+        uses: actions/cache@v4
+        with:
+          path: test/spec/spec_tests
+          key: ${{ hashFiles('test/spec/version.txt') }}
+
+      - name: Download spec tests
+        run: |
+          zig build run:download_spec_tests
+
+      - name: Write ssz_generic spec tests
+        run: |
+          zig build run:write_ssz_generic_spec_tests
+
+      - name: Write ssz_static spec tests
+        run: |
+          zig build run:write_ssz_static_spec_tests
+
+      - name: Run ssz_generic spec tests
+        run: |
+          zig build test:ssz_generic_spec_tests
+
+      - name: Run minimal ssz_static spec tests
+        run: |
+          zig build test:ssz_static_spec_tests -Dpreset=minimal
+
+      - name: Run mainnet ssz_static spec tests
+        run: |
+          zig build test:ssz_static_spec_tests -Dpreset=mainnet
+
