@@ -62,7 +62,7 @@ test "BitListType equals" {
 
     var a = try BitList.Type.fromBitLen(allocator, 8);
     var b = try BitList.Type.fromBitLen(allocator, 8);
-    var c = try BitList.Type.fromBitLen(allocator, 7); 
+    var c = try BitList.Type.fromBitLen(allocator, 7);
 
     defer a.deinit(allocator);
     defer b.deinit(allocator);
