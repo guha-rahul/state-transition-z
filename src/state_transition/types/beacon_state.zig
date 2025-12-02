@@ -571,7 +571,8 @@ pub const BeaconStateAllForks = union(enum) {
             .bellatrix => |state| .{ .bellatrix = &state.latest_execution_payload_header },
             .capella => |state| .{ .capella = &state.latest_execution_payload_header },
             .deneb => |state| .{ .deneb = &state.latest_execution_payload_header },
-            .electra, .fulu => |state| .{ .electra = &state.latest_execution_payload_header },
+            .electra => |state| .{ .electra = &state.latest_execution_payload_header },
+            .fulu => |state| .{ .electra = &state.latest_execution_payload_header },
             else => panic("latest_execution_payload_header is not available in {}", .{self}),
         };
     }
@@ -581,7 +582,8 @@ pub const BeaconStateAllForks = union(enum) {
             .bellatrix => |state| state.latest_execution_payload_header = header.bellatrix.*,
             .capella => |state| state.latest_execution_payload_header = header.capella.*,
             .deneb => |state| state.latest_execution_payload_header = header.deneb.*,
-            .electra, .fulu => |state| state.latest_execution_payload_header = header.electra.*,
+            .electra => |state| state.latest_execution_payload_header = header.electra.*,
+            .fulu => |state| state.latest_execution_payload_header = header.electra.*,
             else => panic("latest_execution_payload_header is not available in {}", .{self}),
         }
     }

@@ -60,7 +60,8 @@ pub fn isMergeTransitionComplete(state: *const BeaconStateAllForks) bool {
     return switch (state.*) {
         .capella => |s| !types.capella.ExecutionPayloadHeader.equals(&s.latest_execution_payload_header, &types.capella.ExecutionPayloadHeader.default_value),
         .deneb => |s| !types.deneb.ExecutionPayloadHeader.equals(&s.latest_execution_payload_header, &types.deneb.ExecutionPayloadHeader.default_value),
-        .electra, .fulu => |s| !types.electra.ExecutionPayloadHeader.equals(&s.latest_execution_payload_header, &types.electra.ExecutionPayloadHeader.default_value),
+        .electra => |s| !types.electra.ExecutionPayloadHeader.equals(&s.latest_execution_payload_header, &types.electra.ExecutionPayloadHeader.default_value),
+        .fulu => |s| !types.electra.ExecutionPayloadHeader.equals(&s.latest_execution_payload_header, &types.electra.ExecutionPayloadHeader.default_value),
         else => false,
     };
 }
