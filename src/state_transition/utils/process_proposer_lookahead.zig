@@ -41,8 +41,8 @@ pub fn computeProposerIndices(
 
         // Hash seed + slot to get the proposer seed for this slot
         var buffer: [40]u8 = [_]u8{0} ** 40;
-        std.mem.copyForwards(u8, buffer[0..32], seed[0..]);
-        std.mem.copyForwards(u8, buffer[32..40], slot_buf[0..]);
+        @memcpy(buffer[0..32], seed[0..]);
+        @memcpy(buffer[32..40], slot_buf[0..]);
         var slot_seed: [32]u8 = undefined;
         digest(buffer[0..], &slot_seed);
 
