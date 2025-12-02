@@ -16,6 +16,7 @@ const bellatrix = types.bellatrix;
 const capella = types.capella;
 const deneb = types.deneb;
 const electra = types.electra;
+const fulu = types.fulu;
 
 pub const BlsSetting = enum {
     default,
@@ -251,6 +252,9 @@ pub fn expectEqualBeaconStates(expected: BeaconStateAllForks, actual: BeaconStat
                 if (!phase0.BeaconBlockHeader.equals(&expected.electra.latest_block_header, &actual.electra.latest_block_header)) return error.LatestBlockHeaderNotEqual;
                 return error.NotEqual;
             }
+        },
+        .fulu => {
+            if (!fulu.BeaconState.equals(expected.fulu, actual.fulu)) return error.NotEqual;
         },
     }
 }
