@@ -41,6 +41,7 @@ pub fn TestCaseUtils(comptime fork: ForkSeq) type {
                 .capella => .bellatrix,
                 .deneb => .capella,
                 .electra => .deneb,
+                .fulu => .electra,
                 else => unreachable,
             };
         }
@@ -173,7 +174,14 @@ pub fn loadSignedBeaconBlock(allocator: std.mem.Allocator, fork: ForkSeq, dir: s
                 .electra = out,
             };
         },
-        // TODO: fulu
+        .fulu => blk: {
+            const out = try allocator.create(fulu.SignedBeaconBlock.Type);
+            out.* = fulu.SignedBeaconBlock.default_value;
+            try loadSszSnappyValue(types.fulu.SignedBeaconBlock, allocator, dir, file_name, out);
+            break :blk SignedBeaconBlock{
+                .fulu = out,
+            };
+        },
     };
 }
 
@@ -204,7 +212,10 @@ pub fn deinitSignedBeaconBlock(signed_block: SignedBeaconBlock, allocator: std.m
             electra.SignedBeaconBlock.deinit(allocator, @constCast(b));
             allocator.destroy(b);
         },
-        // TODO: fulu
+        .fulu => |b| {
+            fulu.SignedBeaconBlock.deinit(allocator, @constCast(b));
+            allocator.destroy(b);
+        },
     }
 }
 

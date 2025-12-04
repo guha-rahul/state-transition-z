@@ -772,41 +772,14 @@ pub const BeaconStateAllForks = union(enum) {
                 return self;
             },
             .electra => |state| {
-                // Create wrapped state for initialization functions
-                const wrapped_state = BeaconStateAllForks{ .electra = state };
-
-                // Compute effective balance increments from the electra state
-                const EffectiveBalanceIncrements = @import("../cache/effective_balance_increments.zig").EffectiveBalanceIncrements;
-
-                var effective_balance_increments = EffectiveBalanceIncrements.init(allocator);
-                defer effective_balance_increments.deinit();
-
-                const validator_list = wrapped_state.validators();
-                for (0..validator_list.items.len) |i| {
-                    const validator = &validator_list.items[i];
-                    const balance_increment: u16 = @intCast(validator.effective_balance / preset.EFFECTIVE_BALANCE_INCREMENT);
-                    try effective_balance_increments.append(balance_increment);
-                }
-
-                // Create the fulu state
-                const fulu_state = try populateFields(
-                    types.electra.BeaconState,
-                    types.fulu.BeaconState,
-                    allocator,
-                    state,
-                );
-
-                // Initialize proposer_lookahead
-                const initializeProposerLookahead = @import("../utils/process_proposer_lookahead.zig").initializeProposerLookahead;
-                try initializeProposerLookahead(
-                    allocator,
-                    &wrapped_state,
-                    &effective_balance_increments,
-                    &fulu_state.proposer_lookahead,
-                );
-
-                self.* = .{ .fulu = fulu_state };
-                allocator.destroy(state);
+                self.* = .{
+                    .fulu = try populateFields(
+                        types.electra.BeaconState,
+                        types.fulu.BeaconState,
+                        allocator,
+                        state,
+                    ),
+                };
                 return self;
             },
             .fulu => {
