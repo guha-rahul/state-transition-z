@@ -44,6 +44,7 @@ pub const upgradeStateToBellatrix = @import("./slot/upgrade_state_to_bellatrix.z
 pub const upgradeStateToCapella = @import("./slot/upgrade_state_to_capella.zig").upgradeStateToCapella;
 pub const upgradeStateToDeneb = @import("./slot/upgrade_state_to_deneb.zig").upgradeStateToDeneb;
 pub const upgradeStateToElectra = @import("./slot/upgrade_state_to_electra.zig").upgradeStateToElectra;
+pub const upgradeStateToFulu = @import("./slot/upgrade_state_to_fulu.zig").upgradeStateToFulu;
 
 // Block
 pub const processBlockHeader = @import("./block/process_block_header.zig").processBlockHeader;
@@ -82,6 +83,7 @@ pub const SignedBlock = @import("./types/block.zig").SignedBlock;
 pub const Block = @import("./types/block.zig").Block;
 pub const SignedBeaconBlock = @import("./types/beacon_block.zig").SignedBeaconBlock;
 pub const Attestations = @import("./types/attestation.zig").Attestations;
+pub const processProposerLookahead = @import("./utils/process_proposer_lookahead.zig");
 
 test {
     testing.refAllDecls(@This());

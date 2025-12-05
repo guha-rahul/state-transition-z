@@ -7,6 +7,7 @@ const upgradeStateToBellatrix = state_transition.upgradeStateToBellatrix;
 const upgradeStateToCapella = state_transition.upgradeStateToCapella;
 const upgradeStateToDeneb = state_transition.upgradeStateToDeneb;
 const upgradeStateToElectra = state_transition.upgradeStateToElectra;
+const upgradeStateToFulu = state_transition.upgradeStateToFulu;
 const TestCachedBeaconStateAllForks = state_transition.test_utils.TestCachedBeaconStateAllForks;
 const BeaconStateAllForks = state_transition.BeaconStateAllForks;
 const test_case = @import("../test_case.zig");
@@ -26,7 +27,7 @@ const Allocator = std.mem.Allocator;
 pub fn TestCase(comptime target_fork: ForkSeq) type {
     comptime {
         switch (target_fork) {
-            .altair, .bellatrix, .capella, .deneb, .electra => {},
+            .altair, .bellatrix, .capella, .deneb, .electra, .fulu => {},
             else => @compileError("fork tests are not defined for " ++ @tagName(target_fork)),
         }
     }
@@ -96,6 +97,7 @@ pub fn TestCase(comptime target_fork: ForkSeq) type {
                 .capella => try upgradeStateToCapella(self.pre.allocator, cached_state),
                 .deneb => try upgradeStateToDeneb(self.pre.allocator, cached_state),
                 .electra => try upgradeStateToElectra(self.pre.allocator, cached_state),
+                .fulu => try upgradeStateToFulu(self.pre.allocator, cached_state),
                 else => unreachable,
             }
         }
@@ -127,6 +129,7 @@ fn previousFork(target: ForkSeq) ForkSeq {
         .capella => .bellatrix,
         .deneb => .capella,
         .electra => .deneb,
+        .fulu => .electra,
         else => @compileError("Unsupported fork transition for " ++ @tagName(target)),
     };
 }
