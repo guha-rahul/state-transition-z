@@ -36,6 +36,8 @@ const PubkeyIndexMap = state_transition.PubkeyIndexMap(ValidatorIndex);
 const Withdrawals = types.capella.Withdrawals.Type;
 const WithdrawalsResult = state_transition.WithdrawalsResult;
 const BlockExternalData = state_transition.BlockExternalData;
+const BeaconState = types.fulu.BeaconState;
+const FuluSignedBeaconBlock = types.fulu.SignedBeaconBlock;
 
 // Benchmark for block processing (Fulu)
 // https://github.com/ethereum/consensus-specs/blob/master/specs/fulu/beacon-chain.md#block-processing
@@ -223,9 +225,9 @@ pub fn main() !void {
 
     try stdout.print("State file loaded: {} bytes\n", .{state_bytes.len});
 
-    const fulu_state = try allocator.create(types.fulu.BeaconState.Type);
-    fulu_state.* = types.fulu.BeaconState.default_value;
-    try types.fulu.BeaconState.deserializeFromBytes(allocator, state_bytes, fulu_state);
+    const fulu_state = try allocator.create(BeaconState.Type);
+    fulu_state.* = BeaconState.default_value;
+    try BeaconState.deserializeFromBytes(allocator, state_bytes, fulu_state);
 
     try stdout.print("State deserialized: slot={}, validators={}\n", .{ fulu_state.slot, fulu_state.validators.items.len });
 
@@ -237,9 +239,9 @@ pub fn main() !void {
 
     try stdout.print("Block file loaded: {} bytes\n", .{block_bytes.len});
 
-    const signed_block_data = try allocator.create(types.fulu.SignedBeaconBlock.Type);
-    signed_block_data.* = types.fulu.SignedBeaconBlock.default_value;
-    try types.fulu.SignedBeaconBlock.deserializeFromBytes(allocator, block_bytes, signed_block_data);
+    const signed_block_data = try allocator.create(FuluSignedBeaconBlock.Type);
+    signed_block_data.* = FuluSignedBeaconBlock.default_value;
+    try FuluSignedBeaconBlock.deserializeFromBytes(allocator, block_bytes, signed_block_data);
 
     try stdout.print("Block deserialized: slot={}, proposer={}\n", .{ signed_block_data.message.slot, signed_block_data.message.proposer_index });
 
