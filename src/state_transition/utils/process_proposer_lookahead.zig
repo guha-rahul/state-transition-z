@@ -19,12 +19,12 @@ pub fn initializeProposerLookahead(
     cached_state: *const CachedBeaconStateAllForks,
     out: []ValidatorIndex,
 ) !void {
-    const epoch_cache = cached_state.epoch_cache_ref.get();
-    const state = cached_state.state;
-
     const lookahead_epochs = preset.MIN_SEED_LOOKAHEAD + 1;
     const expected_len = lookahead_epochs * preset.SLOTS_PER_EPOCH;
-    std.debug.assert(out.len == expected_len);
+    if (out.len != expected_len) return error.InvalidProposerLookaheadLength;
+
+    const epoch_cache = cached_state.epoch_cache_ref.get();
+    const state = cached_state.state;
 
     const current_epoch = computeEpochAtSlot(state.slot());
     const effective_balance_increments = epoch_cache.getEffectiveBalanceIncrements();
