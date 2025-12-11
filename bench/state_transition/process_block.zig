@@ -1,5 +1,5 @@
-// Benchmark for block processing (Fulu)
-// https://github.com/ethereum/consensus-specs/blob/master/specs/fulu/beacon-chain.md#block-processing
+// Benchmark for block processing (works for any fork)
+// https://github.com/ethereum/consensus-specs/blob/master/specs/fulu/beacon-chain.md#block-processing //fulu specs
 //
 // Uses real mainnet state and block:
 // - State: slot 13180928
@@ -24,7 +24,7 @@
 // Memory: 16Gi
 //
 // zbuild run bench_process_block -Doptimize=ReleaseFast OR zbuild run bench_process_block -Doptimize=ReleaseFast -- /path/to/state.ssz /path/to/block.ssz
-//
+
 // State: slot=13180929, validators=2156873
 // benchmark              runs     total time     time/run (avg ± σ)     (min ... max)                p75        p99        p995
 // -----------------------------------------------------------------------------------------------------------------------------
