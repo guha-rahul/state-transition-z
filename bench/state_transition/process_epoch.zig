@@ -79,6 +79,8 @@ const BeaconStateAllForks = state_transition.BeaconStateAllForks;
 const EpochTransitionCache = state_transition.EpochTransitionCache;
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 const PubkeyIndexMap = state_transition.PubkeyIndexMap(ValidatorIndex);
+const slotFromStateBytes = @import("utils.zig").slotFromStateBytes;
+const loadState = @import("utils.zig").loadState;
 
 const ProcessJustificationAndFinalizationBench = struct {
     cached_state: *CachedBeaconStateAllForks,
@@ -524,20 +526,6 @@ const ProcessEpochSegmentedBench = struct {
     }
 };
 
-fn loadState(comptime fork: ForkSeq, allocator: std.mem.Allocator, state_bytes: []const u8) !*BeaconStateAllForks {
-    const ForkTypes = @field(types, @tagName(fork));
-    const BeaconState = ForkTypes.BeaconState;
-
-    const state_data = try allocator.create(BeaconState.Type);
-    errdefer allocator.destroy(state_data);
-    state_data.* = BeaconState.default_value;
-    try BeaconState.deserializeFromBytes(allocator, state_bytes, state_data);
-
-    const beacon_state = try allocator.create(BeaconStateAllForks);
-    beacon_state.* = @unionInit(BeaconStateAllForks, @tagName(fork), state_data);
-    return beacon_state;
-}
-
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const stdout = std.io.getStdOut().writer();
@@ -559,10 +547,7 @@ pub fn main() !void {
 
     // Detect fork from state SSZ bytes
     const chain_config = config.mainnet_chain_config;
-    const slot = config.slotFromStateBytes(state_bytes) orelse {
-        try stdout.print("Error: Could not read slot from state SSZ bytes\n", .{});
-        return error.InvalidStateBytes;
-    };
+    const slot = slotFromStateBytes(state_bytes);
     const detected_fork = config.forkSeqAtSlot(chain_config, slot);
     try stdout.print("Detected fork: {s} (slot {})\n", .{ @tagName(detected_fork), slot });
 

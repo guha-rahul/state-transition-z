@@ -99,18 +99,6 @@ pub const ForkInfo = struct {
     prev_fork_seq: ForkSeq,
 };
 
-/// Read slot from raw BeaconState SSZ bytes (offset 40)
-pub fn slotFromStateBytes(state_bytes: []const u8) ?Slot {
-    if (state_bytes.len < 48) return null;
-    return std.mem.readInt(u64, state_bytes[40..48], .little);
-}
-
-/// Read slot from raw SignedBeaconBlock SSZ bytes (offset 100)
-pub fn slotFromBlockBytes(block_bytes: []const u8) ?Slot {
-    if (block_bytes.len < 108) return null;
-    return std.mem.readInt(u64, block_bytes[100..108], .little);
-}
-
 /// Determine ForkSeq from slot using chain config
 pub fn forkSeqAtSlot(chain_config: ChainConfig, slot: Slot) ForkSeq {
     const epoch = slot / preset.SLOTS_PER_EPOCH;

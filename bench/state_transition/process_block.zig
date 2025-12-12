@@ -71,6 +71,9 @@ const PubkeyIndexMap = state_transition.PubkeyIndexMap(ValidatorIndex);
 const Withdrawals = types.capella.Withdrawals.Type;
 const WithdrawalsResult = state_transition.WithdrawalsResult;
 const BlockExternalData = state_transition.BlockExternalData;
+const slotFromStateBytes = @import("utils.zig").slotFromStateBytes;
+const loadState = @import("utils.zig").loadState;
+const loadBlock = @import("utils.zig").loadBlock;
 
 const ProcessBlockHeaderBench = struct {
     cached_state: *CachedBeaconStateAllForks,
@@ -352,28 +355,6 @@ const ProcessBlockSegmentedBench = struct {
     }
 };
 
-fn loadState(comptime fork: ForkSeq, allocator: std.mem.Allocator, state_bytes: []const u8) !*BeaconStateAllForks {
-    const ForkTypes = @field(types, @tagName(fork));
-    const BeaconState = ForkTypes.BeaconState;
-    const state_data = try allocator.create(BeaconState.Type);
-    errdefer allocator.destroy(state_data);
-    state_data.* = BeaconState.default_value;
-    try BeaconState.deserializeFromBytes(allocator, state_bytes, state_data);
-    const beacon_state = try allocator.create(BeaconStateAllForks);
-    beacon_state.* = @unionInit(BeaconStateAllForks, @tagName(fork), state_data);
-    return beacon_state;
-}
-
-fn loadBlock(comptime fork: ForkSeq, allocator: std.mem.Allocator, block_bytes: []const u8) !SignedBeaconBlock {
-    const ForkTypes = @field(types, @tagName(fork));
-    const SignedBeaconBlockType = ForkTypes.SignedBeaconBlock;
-    const block_data = try allocator.create(SignedBeaconBlockType.Type);
-    errdefer allocator.destroy(block_data);
-    block_data.* = SignedBeaconBlockType.default_value;
-    try SignedBeaconBlockType.deserializeFromBytes(allocator, block_bytes, block_data);
-    return @unionInit(SignedBeaconBlock, @tagName(fork), block_data);
-}
-
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     const stdout = std.io.getStdOut().writer();
@@ -389,7 +370,7 @@ pub fn main() !void {
     defer allocator.free(state_bytes);
 
     const chain_config = config.mainnet_chain_config;
-    const slot = config.slotFromStateBytes(state_bytes) orelse return error.InvalidStateBytes;
+    const slot = slotFromStateBytes(state_bytes);
     const detected_fork = config.forkSeqAtSlot(chain_config, slot);
     try stdout.print("Detected fork: {s} (slot {})\n", .{ @tagName(detected_fork), slot });
 
