@@ -670,12 +670,12 @@ fn runBenchmark(
         }, .{});
     }
 
-    // Actual processEpoch function
-    try bench.addParam("process_epoch", &ProcessEpochBench{ .cached_state = cached_state }, .{});
+    // Non-segmented
+    try bench.addParam("epoch(non-segmented)", &ProcessEpochBench{ .cached_state = cached_state }, .{});
 
-    // Segmented benchmark (step-by-step timing)
+    // Segmented (step-by-step timing)
     resetSegmentStats();
-    try bench.addParam("epoch(segments)", &ProcessEpochSegmentedBench{ .cached_state = cached_state }, .{});
+    try bench.addParam("epoch(segmented)", &ProcessEpochSegmentedBench{ .cached_state = cached_state }, .{});
 
     try bench.run(stdout);
     try printSegmentStats(stdout);
