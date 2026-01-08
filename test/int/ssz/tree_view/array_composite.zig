@@ -393,7 +393,6 @@ test "ArrayCompositeTreeView - get and set" {
     defer view.deinit();
 
     var elem0 = try view.get(0);
-    defer elem0.deinit();
     var bytes0: [Root32.fixed_size]u8 = undefined;
     const bytes0_written = try elem0.serializeIntoBytes(&bytes0);
     try std.testing.expectEqual(bytes0.len, bytes0_written);
@@ -405,7 +404,6 @@ test "ArrayCompositeTreeView - get and set" {
     try view.set(1, new_elem);
 
     var elem1 = try view.get(1);
-    defer elem1.deinit();
     var bytes1: [Root32.fixed_size]u8 = undefined;
     const bytes1_written = try elem1.serializeIntoBytes(&bytes1);
     try std.testing.expectEqual(bytes1.len, bytes1_written);

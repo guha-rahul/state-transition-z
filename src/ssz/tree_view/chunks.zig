@@ -134,16 +134,7 @@ pub fn CompositeChunks(
 
         pub fn set(base_view: *BaseTreeView, index: usize, value: Element) !void {
             const gindex = Gindex.fromDepth(chunk_depth, index);
-            try base_view.data.changed.put(base_view.allocator, gindex, {});
-            const opt_old_data = try base_view.data.children_data.fetchPut(
-                base_view.allocator,
-                gindex,
-                value.base_view.data,
-            );
-            if (opt_old_data) |old_data_value| {
-                var data_ptr: *TreeViewData = @constCast(&old_data_value.value);
-                data_ptr.deinit(base_view.allocator, base_view.pool);
-            }
+            try base_view.setChildData(gindex, value.base_view.data);
         }
     };
 }
