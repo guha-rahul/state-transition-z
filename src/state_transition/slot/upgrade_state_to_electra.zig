@@ -35,7 +35,7 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
     // [EIP-7251]: add validators that are not yet active to pending balance deposits
     var pre_activation = std.ArrayList(ct.primitive.ValidatorIndex.Type).init(allocator);
     defer pre_activation.deinit();
-    const validators_slice = try (try state.validators()).getAll(allocator);
+    const validators_slice = try state.validatorsSlice(allocator);
     defer allocator.free(validators_slice);
     for (validators_slice, 0..) |validator, validator_index| {
         const activation_epoch = validator.activation_epoch;

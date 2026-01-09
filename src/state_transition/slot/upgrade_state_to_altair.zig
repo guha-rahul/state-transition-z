@@ -21,12 +21,12 @@ pub fn upgradeStateToAltair(allocator: Allocator, cached_state: *CachedBeaconSta
     errdefer altair_state.deinit();
 
     try altair_state.setFork(.{
-        .previous_version = try (try phase0_state.fork()).getValue("current_version"),
+        .previous_version = try phase0_state.forkCurrentVersion(),
         .current_version = cached_state.config.chain.ALTAIR_FORK_VERSION,
         .epoch = cached_state.getEpochCache().epoch,
     });
 
-    const validator_count = try (try altair_state.validators()).length();
+    const validator_count = try altair_state.validatorsCount();
     const previous_epoch_participations = try altair_state.previousEpochParticipation();
     try previous_epoch_participations.setLength(validator_count);
 
@@ -51,7 +51,7 @@ pub fn upgradeStateToAltair(allocator: Allocator, cached_state: *CachedBeaconSta
     try altair_state.setPreviousEpochParticipation(epoch_participation);
 
     const previous_epoch = computePreviousEpoch(epoch_cache.epoch);
-    const validators = try (try altair_state.validators()).getAll(allocator);
+    const validators = try altair_state.validatorsSlice(allocator);
     defer allocator.free(validators);
     epoch_cache.previous_target_unslashed_balance_increments = sumTargetUnslashedBalanceIncrements(epoch_participation, previous_epoch, validators);
 }

@@ -17,7 +17,7 @@ pub fn processInactivityUpdates(cached_state: *CachedBeaconState, cache: *const 
     const INACTIVITY_SCORE_BIAS = config.INACTIVITY_SCORE_BIAS;
     const INACTIVITY_SCORE_RECOVERY_RATE = config.INACTIVITY_SCORE_RECOVERY_RATE;
     const flags = cache.flags;
-    const is_in_activity_leak = isInInactivityLeak(cached_state);
+    const is_in_activity_leak = try isInInactivityLeak(cached_state);
 
     // this avoids importing FLAG_ELIGIBLE_ATTESTER inside the for loop, check the compiled code
     const FLAG_PREV_TARGET_ATTESTER_UNSLASHED = attester_status_utils.FLAG_PREV_TARGET_ATTESTER_UNSLASHED;

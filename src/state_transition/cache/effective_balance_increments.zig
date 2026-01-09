@@ -24,7 +24,7 @@ pub fn getEffectiveBalanceIncrementsWithLen(allocator: Allocator, validator_coun
 }
 
 pub fn getEffectiveBalanceIncrements(allocator: Allocator, state: BeaconState) !EffectiveBalanceIncrements {
-    const validators = try (try state.validators()).getAll(allocator);
+    const validators = try state.validatorsSlice(allocator);
     defer allocator.free(validators);
 
     var increments = try EffectiveBalanceIncrements.initCapacity(allocator, validators.len);
