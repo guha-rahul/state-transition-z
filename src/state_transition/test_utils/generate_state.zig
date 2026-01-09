@@ -156,7 +156,7 @@ pub const TestCachedBeaconState = struct {
     cached_state: *CachedBeaconState,
 
     pub fn init(allocator: Allocator, pool: *Node.Pool, validator_count: usize) !TestCachedBeaconState {
-        const state = try generateElectraState(allocator, pool, active_chain_config, validator_count);
+        var state = try generateElectraState(allocator, pool, active_chain_config, validator_count);
         errdefer state.deinit();
 
         const fork_view = try state.fork();
@@ -176,7 +176,7 @@ pub const TestCachedBeaconState = struct {
         const chain_config = getConfig(active_chain_config, fork, fork_epoch);
         const config = try allocator.create(BeaconConfig);
         errdefer allocator.destroy(config);
-        config.* = BeaconConfig.init(chain_config, state.genesisValidatorsRoot());
+        config.* = BeaconConfig.init(chain_config, (try state.genesisValidatorsRoot()).*);
 
         try syncPubkeys(state.validators().items, pubkey_index_map, index_pubkey_cache);
 
