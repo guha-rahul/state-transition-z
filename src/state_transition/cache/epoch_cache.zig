@@ -147,7 +147,7 @@ pub const EpochCache = struct {
         const pubkey_to_index = immutable_data.pubkey_to_index;
         const index_to_pubkey = immutable_data.index_to_pubkey;
 
-        const current_epoch = computeEpochAtSlot(state.slot());
+        const current_epoch = computeEpochAtSlot(try state.slot());
         const is_genesis = current_epoch == GENESIS_EPOCH;
         const previous_epoch = if (is_genesis) GENESIS_EPOCH else current_epoch - 1;
         const next_epoch = current_epoch + 1;
@@ -156,7 +156,8 @@ pub const EpochCache = struct {
         var exit_queue_epoch = computeActivationExitEpoch(current_epoch);
         var exit_queue_churn: u64 = 0;
 
-        const validators = try (try state.validators()).getAll(allocator);
+        var validator_view = try state.validators();
+        const validators = try validator_view.getAllReadonlyValues(allocator);
         defer allocator.free(validators);
 
         const validator_count = validators.len;
@@ -432,7 +433,7 @@ pub const EpochCache = struct {
         self.next_shuffling = try EpochShufflingRc.init(self.allocator, next_shuffling);
 
         self.churn_limit = getChurnLimit(self.config, self.current_shuffling.get().active_indices.len);
-        self.activation_churn_limit = getActivationChurnLimit(self.config, self.config.forkSeq(state.slot()), self.current_shuffling.get().active_indices.len);
+        self.activation_churn_limit = getActivationChurnLimit(self.config, self.config.forkSeq(try state.slot()), self.current_shuffling.get().active_indices.len);
 
         const exit_queue_epoch = computeActivationExitEpoch(upcoming_epoch);
         if (exit_queue_epoch > self.exit_queue_epoch) {
@@ -450,7 +451,7 @@ pub const EpochCache = struct {
 
         self.previous_target_unslashed_balance_increments = self.current_target_unslashed_balance_increments;
         self.current_target_unslashed_balance_increments = 0;
-        self.epoch = computeEpochAtSlot(state.slot());
+        self.epoch = computeEpochAtSlot(try state.slot());
         self.sync_period = computeSyncPeriodAtEpoch(self.epoch);
     }
 
