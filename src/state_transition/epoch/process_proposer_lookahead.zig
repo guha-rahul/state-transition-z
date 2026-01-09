@@ -21,12 +21,8 @@ pub fn processProposerLookahead(
 ) !void {
     const state = cached_state.state;
 
-    const fulu_state = switch (state.*) {
-        .fulu => |s| s,
-        // We already check for `state.isFulu()` in `processEpoch`
-        // but if we do get in here we simply return.
-        else => return,
-    };
+    const proposer_lookahead: []u64 = try state.proposerLookaheadSlice(allocator);
+    defer allocator.free(proposer_lookahead);
 
     const epoch_cache = cached_state.epoch_cache_ref.get();
     const lookahead_epochs = preset.MIN_SEED_LOOKAHEAD + 1;
@@ -35,8 +31,8 @@ pub fn processProposerLookahead(
     // Shift out proposers in the first epoch
     std.mem.copyForwards(
         ValidatorIndex,
-        fulu_state.proposer_lookahead[0..last_epoch_start],
-        fulu_state.proposer_lookahead[preset.SLOTS_PER_EPOCH..],
+        proposer_lookahead[0..last_epoch_start],
+        proposer_lookahead[preset.SLOTS_PER_EPOCH..],
     );
 
     // Fill in the last epoch with new proposer indices
@@ -59,6 +55,8 @@ pub fn processProposerLookahead(
         new_epoch,
         active_indices,
         effective_balance_increments,
-        fulu_state.proposer_lookahead[last_epoch_start..],
+        proposer_lookahead[last_epoch_start..],
     );
+
+    try state.setProposerLookahead(&proposer_lookahead);
 }

@@ -665,6 +665,13 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    /// Returns a read-only slice of proposer_lookahead values.
+    /// Caller owns the returned slice and must free it with the same allocator.
+    pub fn proposerLookaheadSlice(self: *const BeaconState, allocator: Allocator) ![]const u64 {
+        var lookahead_view = try self.proposerLookahead();
+        return lookahead_view.getAllReadonlyValues(allocator);
+    }
+
     pub fn setProposerLookahead(self: *BeaconState, proposer_lookahead: *const ct.fulu.ProposerLookahead.Type) !void {
         return switch (self.*) {
             .phase0, .altair, .bellatrix, .capella, .deneb, .electra => error.InvalidAtFork,
