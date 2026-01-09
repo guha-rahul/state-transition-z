@@ -126,9 +126,11 @@ pub fn generateElectraState(allocator: Allocator, pool: *Node.Pool, chain_config
 
     var next_sync_committee_pubkeys: [preset.SYNC_COMMITTEE_SIZE]BLSPubkey = undefined;
     var next_sync_committee_pubkeys_slices: [preset.SYNC_COMMITTEE_SIZE]blst.PublicKey = undefined;
-    const validators = try beacon_state.validators();
+    var validators = try beacon_state.validators();
     for (next_sync_committee_indices, 0..next_sync_committee_indices.len) |index, i| {
-        next_sync_committee_pubkeys[i] = (try validators.get(index)).pubkey;
+        var validator = try validators.get(@intCast(index));
+        var pubkey_view = try validator.get("pubkey");
+        _ = try pubkey_view.getAllInto(next_sync_committee_pubkeys[i][0..]);
         next_sync_committee_pubkeys_slices[i] = try blst.PublicKey.uncompress(&next_sync_committee_pubkeys[i]);
     }
 
@@ -136,12 +138,12 @@ pub fn generateElectraState(allocator: Allocator, pool: *Node.Pool, chain_config
     var next_sync_committee = try beacon_state.nextSyncCommittee();
     // Rotate syncCommittee in state
     const aggregate_pubkey = (try blst.AggregatePublicKey.aggregate(&next_sync_committee_pubkeys_slices, false)).toPublicKey().compress();
-    try next_sync_committee.set("pubkeys", &next_sync_committee_pubkeys);
-    try next_sync_committee.set("aggregate_pubkey", &aggregate_pubkey);
+    try next_sync_committee.setValue("pubkeys", &next_sync_committee_pubkeys);
+    try next_sync_committee.setValue("aggregate_pubkey", &aggregate_pubkey);
 
     // initialize current sync committee to be the same as next sync committee
-    try current_sync_committee.set("pubkeys", &next_sync_committee_pubkeys);
-    try current_sync_committee.set("aggregate_pubkey", &aggregate_pubkey);
+    try current_sync_committee.setValue("pubkeys", &next_sync_committee_pubkeys);
+    try current_sync_committee.setValue("aggregate_pubkey", &aggregate_pubkey);
 
     return beacon_state;
 }
