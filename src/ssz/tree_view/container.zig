@@ -153,11 +153,10 @@ pub fn ContainerTreeView(comptime ST: type) type {
         pub fn toValue(self: *Self, allocator: Allocator, out: *ST.Type) !void {
             try self.commit();
             if (comptime isFixedType(ST)) {
-                try ST.tree.toValue(self.base_view.data.root, self.base_view.pool, &out);
+                try ST.tree.toValue(self.base_view.data.root, self.base_view.pool, out);
             } else {
-                try ST.tree.toValue(allocator, self.base_view.data.root, self.base_view.pool, &out);
+                try ST.tree.toValue(allocator, self.base_view.data.root, self.base_view.pool, out);
             }
-            return out;
         }
 
         pub fn setValue(self: *Self, comptime field_name: []const u8, value: *const FieldValue(field_name)) !void {

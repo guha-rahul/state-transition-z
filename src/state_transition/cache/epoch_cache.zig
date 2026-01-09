@@ -170,7 +170,7 @@ pub const EpochCache = struct {
         }
 
         const effective_balance_increment = try getEffectiveBalanceIncrementsWithLen(allocator, validator_count);
-        const total_slashings_by_increment = getTotalSlashingsByIncrement(state);
+        const total_slashings_by_increment = try getTotalSlashingsByIncrement(state);
         var previous_active_indices_array_list = std.ArrayList(ValidatorIndex).init(allocator);
         defer previous_active_indices_array_list.deinit();
         try previous_active_indices_array_list.ensureTotalCapacity(validator_count);
@@ -251,8 +251,20 @@ pub const EpochCache = struct {
         const sync_proposer_reward: u64 = @intFromFloat(std.math.floor(sync_participant_reward_f64 * proposer_weight_factor));
         const base_reward_pre_increment = computeBaseRewardPerIncrement(total_active_balance_increments);
         const skip_sync_committee_cache = if (option) |opt| opt.skip_sync_committee_cache else !after_altair_fork;
-        var current_sync_committee_indexed = if (skip_sync_committee_cache) SyncCommitteeCacheAllForks.initEmpty() else try SyncCommitteeCacheAllForks.initSyncCommittee(allocator, state.currentSyncCommittee(), pubkey_to_index);
-        var next_sync_committee_indexed = if (skip_sync_committee_cache) SyncCommitteeCacheAllForks.initEmpty() else try SyncCommitteeCacheAllForks.initSyncCommittee(allocator, state.nextSyncCommittee(), pubkey_to_index);
+        var current_sync_committee_indexed = blk: {
+            if (skip_sync_committee_cache) break :blk SyncCommitteeCacheAllForks.initEmpty();
+            var current_sc_view = try state.currentSyncCommittee();
+            var current_sc: types.altair.SyncCommittee.Type = undefined;
+            try current_sc_view.toValue(allocator, &current_sc);
+            break :blk try SyncCommitteeCacheAllForks.initSyncCommittee(allocator, &current_sc, pubkey_to_index);
+        };
+        var next_sync_committee_indexed = blk: {
+            if (skip_sync_committee_cache) break :blk SyncCommitteeCacheAllForks.initEmpty();
+            var next_sc_view = try state.nextSyncCommittee();
+            var next_sc: types.altair.SyncCommittee.Type = undefined;
+            try next_sc_view.toValue(allocator, &next_sc);
+            break :blk try SyncCommitteeCacheAllForks.initSyncCommittee(allocator, &next_sc, pubkey_to_index);
+        };
 
         errdefer {
             current_sync_committee_indexed.deinit();

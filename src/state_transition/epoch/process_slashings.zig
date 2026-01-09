@@ -23,10 +23,10 @@ pub fn processSlashings(
     }
     const config = cached_state.config;
     const epoch_cache = cached_state.getEpochCache();
-    const state = cached_state.state;
+    var state = &cached_state.state;
 
     const total_balance_by_increment = cache.total_active_stake_by_increment;
-    const fork = config.forkSeq(state.slot());
+    const fork = config.forkSeq(try state.slot());
     const proportional_slashing_multiplier: u64 =
         if (fork == ForkSeq.phase0) PROPORTIONAL_SLASHING_MULTIPLIER else if (fork == ForkSeq.altair)
             PROPORTIONAL_SLASHING_MULTIPLIER_ALTAIR
@@ -34,7 +34,7 @@ pub fn processSlashings(
             PROPORTIONAL_SLASHING_MULTIPLIER_BELLATRIX;
 
     const effective_balance_increments = epoch_cache.getEffectiveBalanceIncrements().items;
-    const adjusted_total_slashing_balance_by_increment = @min(getTotalSlashingsByIncrement(state) * proportional_slashing_multiplier, total_balance_by_increment);
+    const adjusted_total_slashing_balance_by_increment = @min((try getTotalSlashingsByIncrement(state)) * proportional_slashing_multiplier, total_balance_by_increment);
     const increment = EFFECTIVE_BALANCE_INCREMENT;
 
     const penalty_per_effective_balance_increment = @divFloor((adjusted_total_slashing_balance_by_increment * increment), total_balance_by_increment);
@@ -56,12 +56,12 @@ pub fn processSlashings(
     }
 }
 
-pub fn getTotalSlashingsByIncrement(state: *const BeaconState) u64 {
+pub fn getTotalSlashingsByIncrement(state: *const BeaconState) !u64 {
     var total_slashings_by_increment: u64 = 0;
-    const count = state.slashings().len;
-
-    for (0..count) |i| {
-        const slashing = state.slashings()[i];
+    var slashings = try state.slashings();
+        const slashings_len = @TypeOf(slashings).length;
+        for (0..slashings_len) |i| {
+        const slashing = try slashings.get(i);
         total_slashings_by_increment += @divFloor(slashing, preset.EFFECTIVE_BALANCE_INCREMENT);
     }
 
