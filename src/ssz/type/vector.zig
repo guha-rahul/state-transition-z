@@ -9,6 +9,7 @@ const isFixedType = @import("type_kind.zig").isFixedType;
 const OffsetIterator = @import("offsets.zig").OffsetIterator;
 const merkleize = @import("hashing").merkleize;
 const maxChunksToDepth = @import("hashing").maxChunksToDepth;
+const getZeroHash = @import("hashing").getZeroHash;
 const Node = @import("persistent_merkle_tree").Node;
 const tree_view = @import("../tree_view/root.zig");
 const ArrayBasicTreeView = tree_view.ArrayBasicTreeView;
@@ -37,6 +38,8 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
         pub const chunk_depth: u8 = maxChunksToDepth(chunk_count);
 
         pub const default_value: Type = [_]Element.Type{Element.default_value} ** length;
+
+        pub const default_root: [32]u8 = getZeroHash(chunk_depth).*;
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             for (a, b) |a_elem, b_elem| {
@@ -275,6 +278,14 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
         pub const chunk_depth: u8 = maxChunksToDepth(chunk_count);
 
         pub const default_value: Type = [_]Element.Type{Element.default_value} ** length;
+
+        pub const default_root: [32]u8 = blk: {
+            var buf: [32]u8 = undefined;
+            var chunks = [_][32]u8{[_]u8{0} ** 32} ** ((chunk_count + 1) / 2 * 2);
+            @memset(chunks[0..length], Element.default_root);
+            merkleize(@ptrCast(&chunks), chunk_depth, &buf) catch unreachable;
+            break :blk buf;
+        };
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             for (a, b) |a_elem, b_elem| {
@@ -953,4 +964,21 @@ test "VectorCompositeType of Container" {
     for (test_cases[0..]) |*tc| {
         try TypeTest.run(allocator, tc);
     }
+}
+
+test "FixedVectorType - default_root" {
+    const VectorU64 = FixedVectorType(UintType(64), 4);
+    var expected_root: [32]u8 = undefined;
+
+    try VectorU64.hashTreeRoot(&VectorU64.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &VectorU64.default_root);
+}
+
+test "VariableVectorType - default_root" {
+    const ListU64 = FixedListType(UintType(64), 8);
+    const VectorList = VariableVectorType(ListU64, 2);
+    var expected_root: [32]u8 = undefined;
+
+    try VectorList.hashTreeRoot(std.testing.allocator, &VectorList.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &VectorList.default_root);
 }

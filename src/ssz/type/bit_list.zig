@@ -11,6 +11,7 @@ const hexLenFromBytes = @import("hex").hexLenFromBytes;
 const merkleize = @import("hashing").merkleize;
 const mixInLength = @import("hashing").mixInLength;
 const maxChunksToDepth = @import("hashing").maxChunksToDepth;
+const getZeroHash = @import("hashing").getZeroHash;
 const Node = @import("persistent_merkle_tree").Node;
 const BitListTreeView = @import("../tree_view/root.zig").BitListTreeView;
 
@@ -256,6 +257,12 @@ pub fn BitListType(comptime _limit: comptime_int) type {
         pub const chunk_depth: u8 = maxChunksToDepth(max_chunk_count);
 
         pub const default_value: Type = Type.empty;
+
+        pub const default_root: [32]u8 = blk: {
+            var buf = getZeroHash(chunk_depth).*;
+            mixInLength(0, &buf);
+            break :blk buf;
+        };
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             return a.equals(b);
@@ -943,4 +950,12 @@ test "BitListType equals" {
 
     try std.testing.expect(BL.equals(&a, &b));
     try std.testing.expect(!BL.equals(&a, &c));
+}
+
+test "BitListType - default_root" {
+    const Bits2048 = BitListType(2048);
+    var expected_root: [32]u8 = undefined;
+
+    try Bits2048.hashTreeRoot(std.testing.allocator, &Bits2048.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &Bits2048.default_root);
 }

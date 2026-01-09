@@ -10,6 +10,8 @@ const bytesToHex = @import("hex").bytesToHex;
 const merkleize = @import("hashing").merkleize;
 const mixInLength = @import("hashing").mixInLength;
 const maxChunksToDepth = @import("hashing").maxChunksToDepth;
+const getZeroHash = @import("hashing").getZeroHash;
+const Depth = @import("persistent_merkle_tree").Depth;
 const Node = @import("persistent_merkle_tree").Node;
 const ListBasicTreeView = @import("../tree_view/root.zig").ListBasicTreeView;
 
@@ -32,9 +34,15 @@ pub fn ByteListType(comptime _limit: comptime_int) type {
         pub const min_size: usize = 0;
         pub const max_size: usize = Element.fixed_size * limit;
         pub const max_chunk_count: usize = std.math.divCeil(usize, max_size, 32) catch unreachable;
-        pub const chunk_depth: u8 = maxChunksToDepth(max_chunk_count);
+        pub const chunk_depth: Depth = maxChunksToDepth(max_chunk_count);
 
         pub const default_value: Type = Type.empty;
+
+        pub const default_root: [32]u8 = blk: {
+            var buf = getZeroHash(chunk_depth).*;
+            mixInLength(0, &buf);
+            break :blk buf;
+        };
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             return std.mem.eql(u8, a.items, b.items);
@@ -577,4 +585,12 @@ test "ByteListType" {
     for (test_cases[0..]) |*tc| {
         try TypeTest.run(allocator, tc);
     }
+}
+
+test "ByteListType - default_root" {
+    const ByteList256 = ByteListType(256);
+    var expected_root: [32]u8 = undefined;
+
+    try ByteList256.hashTreeRoot(std.testing.allocator, &ByteList256.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &ByteList256.default_root);
 }
