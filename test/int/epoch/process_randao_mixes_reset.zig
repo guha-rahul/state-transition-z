@@ -11,7 +11,7 @@ test "processRandaoMixesReset - sanity" {
         state_transition.processRandaoMixesReset,
         .{
             .alloc = false,
-            .err_return = false,
+            .err_return = true,
             .void_return = true,
         },
     ).testProcessEpochFn();
