@@ -118,32 +118,32 @@ pub fn generateElectraState(allocator: Allocator, pool: *Node.Pool, chain_config
     };
 
     // the same logic to processSyncCommitteeUpdates
-    const beacon_state = try allocator.create(BeaconState);
-    errdefer allocator.destroy(beacon_state);
-    beacon_state.* = .{ .electra = electra_state };
-    const validators = beacon_state.validators();
+    var beacon_state = try BeaconState.fromValue(allocator, pool, .electra, electra_state);
+    errdefer beacon_state.deinit();
+
     var next_sync_committee_indices: [preset.SYNC_COMMITTEE_SIZE]ValidatorIndex = undefined;
-    try getNextSyncCommitteeIndices(allocator, beacon_state, active_validator_indices.items, effective_balance_increments, &next_sync_committee_indices);
+    try getNextSyncCommitteeIndices(allocator, &beacon_state, active_validator_indices.items, effective_balance_increments, &next_sync_committee_indices);
 
     var next_sync_committee_pubkeys: [preset.SYNC_COMMITTEE_SIZE]BLSPubkey = undefined;
     var next_sync_committee_pubkeys_slices: [preset.SYNC_COMMITTEE_SIZE]blst.PublicKey = undefined;
+    const validators = try beacon_state.validators();
     for (next_sync_committee_indices, 0..next_sync_committee_indices.len) |index, i| {
-        next_sync_committee_pubkeys[i] = validators.items[index].pubkey;
+        next_sync_committee_pubkeys[i] = (try validators.get(index)).pubkey;
         next_sync_committee_pubkeys_slices[i] = try blst.PublicKey.uncompress(&next_sync_committee_pubkeys[i]);
     }
 
-    const current_sync_committee = beacon_state.currentSyncCommittee();
-    const next_sync_committee = beacon_state.nextSyncCommittee();
+    var current_sync_committee = try beacon_state.currentSyncCommittee();
+    var next_sync_committee = try beacon_state.nextSyncCommittee();
     // Rotate syncCommittee in state
-    next_sync_committee.* = .{
-        .pubkeys = next_sync_committee_pubkeys,
-        .aggregate_pubkey = (try blst.AggregatePublicKey.aggregate(&next_sync_committee_pubkeys_slices, false)).toPublicKey().compress(),
-    };
+    const aggregate_pubkey = (try blst.AggregatePublicKey.aggregate(&next_sync_committee_pubkeys_slices, false)).toPublicKey().compress();
+    try next_sync_committee.set("pubkeys", &next_sync_committee_pubkeys);
+    try next_sync_committee.set("aggregate_pubkey", &aggregate_pubkey);
 
     // initialize current sync committee to be the same as next sync committee
-    current_sync_committee.* = next_sync_committee.*;
+    try current_sync_committee.set("pubkeys", &next_sync_committee_pubkeys);
+    try current_sync_committee.set("aggregate_pubkey", &aggregate_pubkey);
 
-    return try BeaconState.fromValue(allocator, pool, .electra, beacon_state);
+    return beacon_state;
 }
 
 pub const TestCachedBeaconState = struct {
