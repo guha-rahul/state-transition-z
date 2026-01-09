@@ -54,8 +54,9 @@ test "computeProposers - sanity" {
 }
 
 pub fn getNextSyncCommitteeIndices(allocator: Allocator, state: *const BeaconState, active_indices: []const ValidatorIndex, effective_balance_increments: EffectiveBalanceIncrements, out: []ValidatorIndex) !void {
-    const rand_byte_count: ByteCount = if (state.isPostElectra()) ByteCount.Two else ByteCount.One;
-    const max_effective_balance: u64 = if (state.isPostElectra()) preset.MAX_EFFECTIVE_BALANCE_ELECTRA else preset.MAX_EFFECTIVE_BALANCE;
+    const fork_seq = state.forkSeq();
+    const rand_byte_count: ByteCount = if (fork_seq.gte(.electra)) ByteCount.Two else ByteCount.One;
+    const max_effective_balance: u64 = if (fork_seq.gte(.electra)) preset.MAX_EFFECTIVE_BALANCE_ELECTRA else preset.MAX_EFFECTIVE_BALANCE;
     const epoch = computeEpochAtSlot(state.slot()) + 1;
     var seed: [32]u8 = undefined;
     try getSeed(state, epoch, c.DOMAIN_SYNC_COMMITTEE, &seed);
