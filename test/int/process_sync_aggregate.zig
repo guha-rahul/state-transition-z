@@ -1,7 +1,10 @@
 test "process sync aggregate - sanity" {
     const allocator = std.testing.allocator;
 
-    var test_state = try TestCachedBeaconState.init(allocator, 256);
+    var pool = try Node.Pool.init(allocator, 1024);
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
     defer test_state.deinit();
 
     const state = test_state.cached_state.state;
@@ -40,6 +43,7 @@ const c = @import("constants");
 
 const Allocator = std.mem.Allocator;
 const TestCachedBeaconState = @import("state_transition").test_utils.TestCachedBeaconState;
+const Node = @import("persistent_merkle_tree").Node;
 
 const state_transition = @import("state_transition");
 const processSyncAggregate = state_transition.processSyncAggregate;

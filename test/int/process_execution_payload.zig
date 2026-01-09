@@ -1,7 +1,12 @@
+const Node = @import("persistent_merkle_tree").Node;
+
 test "process execution payload - sanity" {
     const allocator = std.testing.allocator;
 
-    var test_state = try TestCachedBeaconState.init(allocator, 256);
+    var pool = try Node.Pool.init(allocator, 1024);
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
     defer test_state.deinit();
 
     var execution_payload: types.electra.ExecutionPayload.Type = types.electra.ExecutionPayload.default_value;

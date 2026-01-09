@@ -1,7 +1,12 @@
+const Node = @import("persistent_merkle_tree").Node;
+
 test "process randao - sanity" {
     const allocator = std.testing.allocator;
 
-    var test_state = try TestCachedBeaconState.init(allocator, 256);
+    var pool = try Node.Pool.init(allocator, 1024);
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
     const slot = config.mainnet.chain_config.ELECTRA_FORK_EPOCH * preset.SLOTS_PER_EPOCH + 2025 * preset.SLOTS_PER_EPOCH - 1;
     defer test_state.deinit();
 

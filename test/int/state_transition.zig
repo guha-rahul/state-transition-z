@@ -8,6 +8,7 @@ const Root = types.primitive.Root.Type;
 const ZERO_HASH = @import("constants").ZERO_HASH;
 
 const state_transition = @import("state_transition");
+const Node = @import("persistent_merkle_tree").Node;
 const stateTransition = state_transition.state_transition.stateTransition;
 const TransitionOpt = state_transition.state_transition.TransitionOpt;
 const SignedBeaconBlock = state_transition.state_transition.SignedBeaconBlock;
@@ -30,7 +31,9 @@ test "state transition - electra block" {
     inline for (test_cases) |tc| {
         const allocator = std.testing.allocator;
 
-        var test_state = try TestCachedBeaconState.init(allocator, 256);
+        var pool = try Node.Pool.init(allocator, 1024);
+        defer pool.deinit();
+        var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
         defer test_state.deinit();
         const electra_block_ptr = try allocator.create(types.electra.SignedBeaconBlock.Type);
         try generateElectraBlock(allocator, test_state.cached_state, electra_block_ptr);
