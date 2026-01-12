@@ -4,8 +4,9 @@ const expect = std.testing.expect;
 const preset = @import("preset").preset;
 const ForkSeq = @import("config").ForkSeq;
 const Node = @import("persistent_merkle_tree").Node;
+const isBasicType = @import("ssz").isBasicType;
 const isFixedType = @import("ssz").isFixedType;
-const CloneOpts = @import("ssz").tree_view.BaseTreeView.CloneOpts;
+const CloneOpts = @import("ssz").BaseTreeView.CloneOpts;
 const ct = @import("consensus_types");
 const ExecutionPayloadHeader = @import("./execution_payload.zig").ExecutionPayloadHeader;
 
@@ -132,13 +133,13 @@ pub const BeaconState = union(ForkSeq) {
 
     pub fn clone(self: *const BeaconState, opts: CloneOpts) !BeaconState {
         return switch (self.*) {
-            .phase0 => |state| .{ .phase0 = try state.clone(opts) },
-            .altair => |state| .{ .altair = try state.clone(opts) },
-            .bellatrix => |state| .{ .bellatrix = try state.clone(opts) },
-            .capella => |state| .{ .capella = try state.clone(opts) },
-            .deneb => |state| .{ .deneb = try state.clone(opts) },
-            .electra => |state| .{ .electra = try state.clone(opts) },
-            .fulu => |state| .{ .fulu = try state.clone(opts) },
+            .phase0 => |*state| .{ .phase0 = try @constCast(state).clone(opts) },
+            .altair => |*state| .{ .altair = try @constCast(state).clone(opts) },
+            .bellatrix => |*state| .{ .bellatrix = try @constCast(state).clone(opts) },
+            .capella => |*state| .{ .capella = try @constCast(state).clone(opts) },
+            .deneb => |*state| .{ .deneb = try @constCast(state).clone(opts) },
+            .electra => |*state| .{ .electra = try @constCast(state).clone(opts) },
+            .fulu => |*state| .{ .fulu = try @constCast(state).clone(opts) },
         };
     }
 
@@ -151,8 +152,8 @@ pub const BeaconState = union(ForkSeq) {
     pub fn hashTreeRoot(self: *const BeaconState) !*const [32]u8 {
         return switch (self.*) {
             inline else => |*state| {
-                try state.commit();
-                return state.base_view.root.getRoot(state.base_view.pool);
+                try @constCast(state).commit();
+                return state.base_view.data.root.getRoot(state.base_view.pool);
             },
         };
     }
@@ -690,6 +691,7 @@ pub const BeaconState = union(ForkSeq) {
     }
 
     /// Copies fields of `BeaconState` from type `F` to type `T`, provided they have the same field name.
+    /// The cache of original state is cleared after the copy is complete.
     fn populateFields(
         comptime F: type,
         comptime T: type,
@@ -708,7 +710,16 @@ pub const BeaconState = union(ForkSeq) {
             // const field_name: []const u8 = comptime f.name[0..f.name.len];
             if (comptime T.hasField(f.name)) {
                 if (comptime isFixedType(f.type)) {
-                    try upgraded.set(f.name, try committed_state.get(f.name));
+                    // For fixed composite fields, get() returns a borrowed TreeView backed by committed_state caches.
+                    // Clone it to create an owned view, then transfer ownership to upgraded.
+                    if (comptime isBasicType(f.type)) {
+                        try upgraded.set(f.name, try committed_state.get(f.name));
+                    } else {
+                        var field_view = try committed_state.get(f.name);
+                        const FieldView = @TypeOf(field_view);
+                        const owned_field_view: FieldView = try field_view.clone(.{ .transfer_cache = true });
+                        try upgraded.set(f.name, owned_field_view);
+                    }
                 } else {
                     if (T.getFieldType(f.name) != f.type) {
                         // BeaconState of prev_fork and cur_fork has the same field name but different types
@@ -797,19 +808,20 @@ test "electra - sanity" {
     var pool = try Node.Pool.init(allocator, 500_000);
     defer pool.deinit();
 
-    const beacon_state = try BeaconState.fromValue(allocator, &pool, .electra, &ct.electra.BeaconState.default_value);
+    var beacon_state = try BeaconState.fromValue(allocator, &pool, .electra, &ct.electra.BeaconState.default_value);
     defer beacon_state.deinit();
 
     try beacon_state.setSlot(12345);
 
-    try std.testing.expect(beacon_state.genesisTime() == 0);
-    try std.testing.expectEqualSlices(u8, &[_]u8{0} ** 32, &beacon_state.genesisValidatorsRoot());
-    try std.testing.expect(beacon_state.slot() == 12345);
+    try std.testing.expect((try beacon_state.genesisTime()) == 0);
+    const genesis_validators_root = try beacon_state.genesisValidatorsRoot();
+    try std.testing.expectEqualSlices(u8, &[_]u8{0} ** 32, genesis_validators_root[0..]);
+    try std.testing.expect((try beacon_state.slot()) == 12345);
     try beacon_state.setSlot(2025);
-    try std.testing.expect(beacon_state.slot() == 2025);
+    try std.testing.expect((try beacon_state.slot()) == 2025);
 
     const out: *const [32]u8 = try beacon_state.hashTreeRoot();
-    try expect(!std.mem.eql(u8, &[_]u8{0} ** 32, &out));
+    try expect(!std.mem.eql(u8, (&[_]u8{0} ** 32)[0..], out.*[0..]));
 
     // TODO: more tests
 }
@@ -819,16 +831,57 @@ test "clone - sanity" {
     var pool = try Node.Pool.init(allocator, 500_000);
     defer pool.deinit();
 
-    const beacon_state = try BeaconState.fromValue(allocator, &pool, .electra, &ct.electra.BeaconState.default_value);
+    var beacon_state = try BeaconState.fromValue(allocator, &pool, .electra, &ct.electra.BeaconState.default_value);
     defer beacon_state.deinit();
 
     try beacon_state.setSlot(12345);
+    try beacon_state.commit();
 
     // test the clone() and deinit() works fine without memory leak
-    const cloned_state = try beacon_state.clone(.{});
+    var cloned_state = try beacon_state.clone(.{});
     defer cloned_state.deinit();
 
-    try expect(cloned_state.slot() == 12345);
+    try expect((try cloned_state.slot()) == 12345);
+}
+
+test "clone - cases" {
+    const allocator = std.testing.allocator;
+
+    const TestCase = struct {
+        name: []const u8,
+        slot_set: u64,
+        commit_before_clone: bool,
+        expected_slot: u64,
+    };
+
+    const test_Case = [_]TestCase{
+        .{ .name = "commit before clone", .slot_set = 12345, .commit_before_clone = true, .expected_slot = 12345 },
+        .{ .name = "no commit before clone", .slot_set = 12345, .commit_before_clone = false, .expected_slot = 0 },
+    };
+
+    inline for (test_Case) |tc| {
+        var pool = try Node.Pool.init(allocator, 500_000);
+        defer pool.deinit();
+
+        var beacon_state = try BeaconState.fromValue(allocator, &pool, .electra, &ct.electra.BeaconState.default_value);
+        defer beacon_state.deinit();
+
+        try beacon_state.setSlot(tc.slot_set);
+        try expect((try beacon_state.slot()) == tc.slot_set);
+
+        if (tc.commit_before_clone) {
+            try beacon_state.commit();
+        }
+
+        var cloned_state = try beacon_state.clone(.{});
+        defer cloned_state.deinit();
+
+        const got = try cloned_state.slot();
+        if (got != tc.expected_slot) {
+            std.debug.print("clone case '{s}' failed: got slot {}, expected {}\n", .{ tc.name, got, tc.expected_slot });
+            return error.TestExpectedEqual;
+        }
+    }
 }
 
 test "upgrade state - sanity" {
@@ -836,30 +889,30 @@ test "upgrade state - sanity" {
     var pool = try Node.Pool.init(allocator, 500_000);
     defer pool.deinit();
 
-    const phase0_state = try BeaconState.fromValue(allocator, &pool, .phase0, &ct.phase0.BeaconState.default_value);
+    var phase0_state = try BeaconState.fromValue(allocator, &pool, .phase0, &ct.phase0.BeaconState.default_value);
     defer phase0_state.deinit();
 
-    const altair_state = try phase0_state.upgradeUnsafe();
+    var altair_state = try phase0_state.upgradeUnsafe();
     defer altair_state.deinit();
     try expect(altair_state.forkSeq() == .altair);
 
-    const bellatrix_state = try altair_state.upgradeUnsafe();
+    var bellatrix_state = try altair_state.upgradeUnsafe();
     defer bellatrix_state.deinit();
     try expect(bellatrix_state.forkSeq() == .bellatrix);
 
-    const capella_state = try bellatrix_state.upgradeUnsafe();
+    var capella_state = try bellatrix_state.upgradeUnsafe();
     defer capella_state.deinit();
     try expect(capella_state.forkSeq() == .capella);
 
-    const deneb_state = try capella_state.upgradeUnsafe();
+    var deneb_state = try capella_state.upgradeUnsafe();
     defer deneb_state.deinit();
     try expect(deneb_state.forkSeq() == .deneb);
 
-    const electra_state = try deneb_state.upgradeUnsafe();
+    var electra_state = try deneb_state.upgradeUnsafe();
     defer electra_state.deinit();
     try expect(electra_state.forkSeq() == .electra);
 
-    const fulu_state = try electra_state.upgradeUnsafe();
+    var fulu_state = try electra_state.upgradeUnsafe();
     defer fulu_state.deinit();
     try expect(fulu_state.forkSeq() == .fulu);
 }
