@@ -63,11 +63,9 @@ pub fn BitVectorTreeView(comptime ST: type) type {
             return BitOps.set(&self.base_view, index, value, length);
         }
 
-        /// Caller must free the returned slice.
-        pub fn toBoolArray(self: *Self, allocator: Allocator) ![]bool {
-            const values = try allocator.alloc(bool, length);
-            errdefer allocator.free(values);
-            try self.toBoolArrayInto(values);
+        pub fn toBoolArray(self: *Self) ![length]bool {
+            var values: [length]bool = undefined;
+            try self.toBoolArrayInto(&values);
             return values;
         }
 

@@ -421,9 +421,21 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    pub fn setJustificationBits(self: *BeaconState, bits: *const ct.phase0.JustificationBits.Type) !void {
+        return switch (self.*) {
+            inline else => |*state| try state.setValue("justification_bits", bits),
+        };
+    }
+
     pub fn previousJustifiedCheckpoint(self: *const BeaconState) !ct.phase0.Checkpoint.TreeView {
         return switch (self.*) {
             inline else => |state| try state.get("previous_justified_checkpoint"),
+        };
+    }
+
+    pub fn setPreviousJustifiedCheckpoint(self: *BeaconState, checkpoint: ct.phase0.Checkpoint.TreeView) !void {
+        return switch (self.*) {
+            inline else => |*state| try state.set("previous_justified_checkpoint", checkpoint),
         };
     }
 
@@ -433,9 +445,21 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    pub fn setCurrentJustifiedCheckpoint(self: *BeaconState, checkpoint: *const ct.phase0.Checkpoint.Type) !void {
+        return switch (self.*) {
+            inline else => |*state| try state.setValue("current_justified_checkpoint", checkpoint),
+        };
+    }
+
     pub fn finalizedCheckpoint(self: *const BeaconState) !ct.phase0.Checkpoint.TreeView {
         return switch (self.*) {
             inline else => |state| try state.get("finalized_checkpoint"),
+        };
+    }
+
+    pub fn setFinalizedCheckpoint(self: *BeaconState, checkpoint: ct.phase0.Checkpoint.TreeView) !void {
+        return switch (self.*) {
+            inline else => |*state| try state.set("finalized_checkpoint", checkpoint),
         };
     }
 

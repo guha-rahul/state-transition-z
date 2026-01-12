@@ -21,26 +21,23 @@ pub fn processJustificationAndFinalization(cached_state: *CachedBeaconState, cac
 }
 
 pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total_active_balance: u64, previous_epoch_target_balance: u64, current_epoch_target_balance: u64) !void {
-    const state = &cached_state.state;
+    var state = cached_state.state;
     const current_epoch = computeEpochAtSlot(try state.slot());
     const previous_epoch = if (current_epoch == GENESIS_EPOCH) GENESIS_EPOCH else current_epoch - 1;
 
-    var previous_justified_checkpoint_view = try state.previousJustifiedCheckpoint();
-    var current_justified_checkpoint_view = try state.currentJustifiedCheckpoint();
-    var finalized_checkpoint_view = try state.finalizedCheckpoint();
-
-    var old_previous_justified_checkpoint: Checkpoint = undefined;
-    var old_current_justified_checkpoint: Checkpoint = undefined;
-    try previous_justified_checkpoint_view.toValue(cached_state.allocator, &old_previous_justified_checkpoint);
-    try current_justified_checkpoint_view.toValue(cached_state.allocator, &old_current_justified_checkpoint);
+    var old_previous_justified_checkpoint = try state.previousJustifiedCheckpoint();
+    var old_current_justified_checkpoint = try state.currentJustifiedCheckpoint();
+    var old_previous_justified_checkpoint_clone: ?types.phase0.Checkpoint.TreeView = try old_previous_justified_checkpoint.clone(.{});
+    defer if (old_previous_justified_checkpoint_clone) |*v| v.deinit();
+    var old_current_justified_checkpoint_clone: ?types.phase0.Checkpoint.TreeView = try old_current_justified_checkpoint.clone(.{});
+    defer if (old_current_justified_checkpoint_clone) |*v| v.deinit();
+    const old_previous_justified_checkpoint_epoch = try old_previous_justified_checkpoint.get("epoch");
+    const old_current_justified_checkpoint_epoch = try old_current_justified_checkpoint.get("epoch");
 
     // Process justifications
-    try previous_justified_checkpoint_view.set("epoch", old_current_justified_checkpoint.epoch);
-    try previous_justified_checkpoint_view.setValue("root", &old_current_justified_checkpoint.root);
-
-    var justification_bits_view = try state.justificationBits();
-    var bits = [_]bool{false} ** JustificationBits.length;
-    try justification_bits_view.toBoolArrayInto(&bits);
+    try state.setPreviousJustifiedCheckpoint(try old_current_justified_checkpoint.clone(.{}));
+    var justification_bits = try state.justificationBits();
+    var bits = try justification_bits.toBoolArray();
 
     // Rotate bits
     var idx: usize = bits.len - 1;
@@ -50,44 +47,58 @@ pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total
     bits[0] = false;
 
     if (previous_epoch_target_balance * 3 > total_active_balance * 2) {
-        const root = try getBlockRoot(state, previous_epoch);
-        try current_justified_checkpoint_view.set("epoch", previous_epoch);
-        try current_justified_checkpoint_view.setValue("root", &root);
+        const new_current_justified_checkpoint = Checkpoint{
+            .epoch = previous_epoch,
+            .root = (try getBlockRoot(&state, previous_epoch)).*,
+        };
+        try state.setCurrentJustifiedCheckpoint(&new_current_justified_checkpoint);
         bits[1] = true;
     }
 
     if (current_epoch_target_balance * 3 > total_active_balance * 2) {
-        const root = try getBlockRoot(state, current_epoch);
-        try current_justified_checkpoint_view.set("epoch", current_epoch);
-        try current_justified_checkpoint_view.setValue("root", &root);
+        const new_current_justified_checkpoint = Checkpoint{
+            .epoch = current_epoch,
+            .root = (try getBlockRoot(&state, current_epoch)).*,
+        };
+        try state.setCurrentJustifiedCheckpoint(&new_current_justified_checkpoint);
         bits[0] = true;
     }
 
-    for (0..bits.len) |i| {
-        try justification_bits_view.set(i, bits[i]);
-    }
-
-    // TODO: Consider rendering bits as array of boolean for faster repeated access here
+    const new_justification_bits = try JustificationBits.fromBoolArray(bits);
+    try state.setJustificationBits(&new_justification_bits);
 
     // Process finalizations
+    var finalized_previous_justified = false;
+    var finalized_current_justified = false;
     // The 2nd/3rd/4th most recent epochs are all justified, the 2nd using the 4th as source
-    if (bits[1] and bits[2] and bits[3] and old_previous_justified_checkpoint.epoch + 3 == current_epoch) {
-        try finalized_checkpoint_view.set("epoch", old_previous_justified_checkpoint.epoch);
-        try finalized_checkpoint_view.setValue("root", &old_previous_justified_checkpoint.root);
+    if (bits[1] and bits[2] and bits[3] and old_previous_justified_checkpoint_epoch + 3 == current_epoch) {
+        try state.setFinalizedCheckpoint(old_previous_justified_checkpoint_clone.?);
+        finalized_previous_justified = true;
     }
     // The 2nd/3rd most recent epochs are both justified, the 2nd using the 3rd as source
-    if (bits[1] and bits[2] and old_previous_justified_checkpoint.epoch + 2 == current_epoch) {
-        try finalized_checkpoint_view.set("epoch", old_previous_justified_checkpoint.epoch);
-        try finalized_checkpoint_view.setValue("root", &old_previous_justified_checkpoint.root);
+    if (bits[1] and bits[2] and old_previous_justified_checkpoint_epoch + 2 == current_epoch) {
+        try state.setFinalizedCheckpoint(old_previous_justified_checkpoint_clone.?);
+        finalized_previous_justified = true;
     }
     // The 1st/2nd/3rd most recent epochs are all justified, the 1st using the 3rd as source
-    if (bits[0] and bits[1] and bits[2] and old_current_justified_checkpoint.epoch + 2 == current_epoch) {
-        try finalized_checkpoint_view.set("epoch", old_current_justified_checkpoint.epoch);
-        try finalized_checkpoint_view.setValue("root", &old_current_justified_checkpoint.root);
+    if (bits[0] and bits[1] and bits[2] and old_current_justified_checkpoint_epoch + 2 == current_epoch) {
+        try state.setFinalizedCheckpoint(old_current_justified_checkpoint_clone.?);
+        finalized_current_justified = true;
     }
     // The 1st/2nd most recent epochs are both justified, the 1st using the 2nd as source
-    if (bits[0] and bits[1] and old_current_justified_checkpoint.epoch + 1 == current_epoch) {
-        try finalized_checkpoint_view.set("epoch", old_current_justified_checkpoint.epoch);
-        try finalized_checkpoint_view.setValue("root", &old_current_justified_checkpoint.root);
+    if (bits[0] and bits[1] and old_current_justified_checkpoint_epoch + 1 == current_epoch) {
+        try state.setFinalizedCheckpoint(old_current_justified_checkpoint_clone.?);
+        finalized_current_justified = true;
+    }
+
+    // TODO this function exposes a nasty UX issue with the current TreeView design
+    // Currently, you're able to get a subview, which then gets deleted.
+    // leading to use-after-free if the caller still holds a reference.
+    // To avoid that, we pre-clone the subviews and then selectively drop them if they get reincorporated into the state.
+    if (finalized_previous_justified) {
+        old_previous_justified_checkpoint_clone = null;
+    }
+    if (finalized_current_justified) {
+        old_current_justified_checkpoint_clone = null;
     }
 }
