@@ -13,7 +13,7 @@ const slashValidator = @import("./slash_validator.zig").slashValidator;
 /// - for phase0 it is `types.phase0.AttesterSlashing.Type`
 /// - for electra it is `types.electra.AttesterSlashing.Type`
 pub fn processAttesterSlashing(comptime AS: type, cached_state: *const CachedBeaconState, attester_slashing: *const AS, verify_signature: bool) !void {
-    const state = cached_state.state;
+    var state = cached_state.state;
     const epoch = cached_state.getEpochCache().epoch;
     try assertValidAttesterSlashing(AS, cached_state, attester_slashing, verify_signature);
 
@@ -21,11 +21,12 @@ pub fn processAttesterSlashing(comptime AS: type, cached_state: *const CachedBea
     defer intersecting_indices.deinit();
 
     var slashed_any: bool = false;
+    var validators = try state.validators();
     // Spec requires to sort indices beforehand but we validated sorted asc AttesterSlashing in the above functions
     for (intersecting_indices.items) |validator_index| {
-        const validator = state.validators().items[validator_index];
+        const validator = try validators.getValue(undefined, validator_index);
         if (isSlashableValidator(&validator, epoch)) {
-            try slashValidator(cached_state, validator_index, null);
+            try slashValidator(@constCast(cached_state), validator_index, null);
             slashed_any = true;
         }
     }

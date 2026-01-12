@@ -15,8 +15,8 @@ pub const RootCache = struct {
     current_justified_checkpoint: Checkpoint,
     previous_justified_checkpoint: Checkpoint,
     state: *const BeaconState,
-    block_root_epoch_cache: std.AutoHashMap(Epoch, Root),
-    block_root_slot_cache: std.AutoHashMap(Slot, Root),
+    block_root_epoch_cache: std.AutoHashMap(Epoch, *const Root),
+    block_root_slot_cache: std.AutoHashMap(Slot, *const Root),
 
     pub fn init(allocator: Allocator, cached_state: *const CachedBeaconState) !*RootCache {
         const instance = try allocator.create(RootCache);
@@ -34,14 +34,14 @@ pub const RootCache = struct {
             .current_justified_checkpoint = current_justified_checkpoint,
             .previous_justified_checkpoint = previous_justified_checkpoint,
             .state = state,
-            .block_root_epoch_cache = std.AutoHashMap(Epoch, Root).init(allocator),
-            .block_root_slot_cache = std.AutoHashMap(Slot, Root).init(allocator),
+            .block_root_epoch_cache = std.AutoHashMap(Epoch, *const Root).init(allocator),
+            .block_root_slot_cache = std.AutoHashMap(Slot, *const Root).init(allocator),
         };
 
         return instance;
     }
 
-    pub fn getBlockRoot(self: *RootCache, epoch: Epoch) !Root {
+    pub fn getBlockRoot(self: *RootCache, epoch: Epoch) !*const Root {
         if (self.block_root_epoch_cache.get(epoch)) |root| {
             return root;
         } else {
@@ -51,7 +51,7 @@ pub const RootCache = struct {
         }
     }
 
-    pub fn getBlockRootAtSlot(self: *RootCache, slot: Slot) !Root {
+    pub fn getBlockRootAtSlot(self: *RootCache, slot: Slot) !*const Root {
         if (self.block_root_slot_cache.get(slot)) |root| {
             return root;
         } else {

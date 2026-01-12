@@ -21,7 +21,7 @@ pub fn getVoluntaryExitSignatureSet(cached_state: *const CachedBeaconState, sign
     const epoch_cache = cached_state.getEpochCache();
 
     const slot = computeStartSlotAtEpoch(signed_voluntary_exit.message.epoch);
-    const domain = try config.getDomainForVoluntaryExit(state.slot(), slot);
+    const domain = try config.getDomainForVoluntaryExit(try state.slot(), slot);
     var signing_root: [32]u8 = undefined;
     try computeSigningRoot(types.phase0.VoluntaryExit, &signed_voluntary_exit.message, domain, &signing_root);
 
@@ -35,7 +35,7 @@ pub fn getVoluntaryExitSignatureSet(cached_state: *const CachedBeaconState, sign
 pub fn voluntaryExitsSignatureSets(cached_state: *const CachedBeaconState, signed_block: *const SignedBeaconBlock, out: std.ArrayList(SingleSignatureSet)) !void {
     const voluntary_exits = signed_block.beaconBlock().beaconBlockBody().voluntaryExits().items;
     for (voluntary_exits) |signed_voluntary_exit| {
-        const signature_set = getVoluntaryExitSignatureSet(cached_state, &signed_voluntary_exit);
+        const signature_set = try getVoluntaryExitSignatureSet(cached_state, &signed_voluntary_exit);
         try out.append(signature_set);
     }
 }

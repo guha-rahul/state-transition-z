@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const CachedBeaconState = @import("../cache/state_cache.zig").CachedBeaconState;
-const ssz = @import("consensus_types");
+const ct = @import("consensus_types");
 
 pub fn upgradeStateToBellatrix(_: Allocator, cached_state: *CachedBeaconState) !void {
     var altair_state = cached_state.state;
@@ -42,12 +42,13 @@ pub fn upgradeStateToBellatrix(_: Allocator, cached_state: *CachedBeaconState) !
     // next_sync_committee           | -   | next_sync_committee
     // -                             | new | latest_execution_payload_header
 
-    const state = try altair_state.upgradeUnsafe();
+    var state = try altair_state.upgradeUnsafe();
     defer altair_state.deinit();
 
-    try state.setFork(.{
-        .previous_version = altair_state.fork().getValue("current_version"),
+    const new_fork: ct.phase0.Fork.Type = .{
+        .previous_version = try altair_state.forkCurrentVersion(),
         .current_version = cached_state.config.chain.BELLATRIX_FORK_VERSION,
         .epoch = cached_state.getEpochCache().epoch,
-    });
+    };
+    try state.setFork(&new_fork);
 }

@@ -16,14 +16,15 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
         return error.StateIsNotDeneb;
     }
 
-    const state = try deneb_state.upgradeUnsafe();
+    var state = try deneb_state.upgradeUnsafe();
     defer deneb_state.deinit();
 
-    state.setFork(.{
-        .previous_version = deneb_state.fork().getValue("current_version"),
+    const new_fork: ct.phase0.Fork.Type = .{
+        .previous_version = try deneb_state.forkCurrentVersion(),
         .current_version = cached_state.config.chain.ELECTRA_FORK_VERSION,
         .epoch = cached_state.getEpochCache().epoch,
-    });
+    };
+    try state.setFork(&new_fork);
 
     try state.setDepositRequestsStartIndex(constants.UNSET_DEPOSIT_REQUESTS_START_INDEX);
     // default values are already 0, don't need to be set explicitly
@@ -54,7 +55,7 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
     try state.setConsolidationBalanceToConsume(getConsolidationChurnLimit(cached_state.getEpochCache()));
 
     const sort_fn = struct {
-        pub fn sort(validator_arr: []ct.phase0.Validator.Type, a: ValidatorIndex, b: ValidatorIndex) bool {
+        pub fn sort(validator_arr: []const ct.phase0.Validator.Type, a: ValidatorIndex, b: ValidatorIndex) bool {
             const activation_eligibility_epoch_a = validator_arr[a].activation_eligibility_epoch;
             const activation_eligibility_epoch_b = validator_arr[b].activation_eligibility_epoch;
             return if (activation_eligibility_epoch_a != activation_eligibility_epoch_b) activation_eligibility_epoch_a < activation_eligibility_epoch_b else a < b;
@@ -63,33 +64,34 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
     std.mem.sort(ValidatorIndex, pre_activation.items, validators_slice, sort_fn);
 
     // const electra_state = state.electra;
-    const balances = try state.balances();
-    const validators = try state.validators();
+    var balances = try state.balances();
+    var validators = try state.validators();
     const effective_balance_increments = cached_state.getEpochCache().getEffectiveBalanceIncrements();
-    const pending_deposits = try state.pendingDeposits();
+    var pending_deposits = try state.pendingDeposits();
     for (pre_activation.items) |validator_index| {
         const balance = try balances.get(validator_index);
         try balances.set(validator_index, 0);
 
-        const validator = try validators.get(validator_index);
+        var validator = try validators.get(validator_index);
         try validator.set("effective_balance", 0);
         effective_balance_increments.items[validator_index] = 0;
         try validator.set("activation_eligibility_epoch", constants.FAR_FUTURE_EPOCH);
 
-        try pending_deposits.pushValue(.{
+        const pending_deposit: ct.electra.PendingDeposit.Type = .{
             .pubkey = validators_slice[validator_index].pubkey,
             .withdrawal_credentials = validators_slice[validator_index].withdrawal_credentials,
             .amount = balance,
             .signature = constants.G2_POINT_AT_INFINITY,
             .slot = constants.GENESIS_SLOT,
-        });
+        };
+        try pending_deposits.pushValue(&pending_deposit);
     }
 
     for (validators_slice, 0..) |validator, validator_index| {
         // [EIP-7251]: Ensure early adopters of compounding credentials go through the activation churn
-        const withdrawal_credential = validator.withdrawal_credentials;
-        if (hasCompoundingWithdrawalCredential(withdrawal_credential)) {
-            try queueExcessActiveBalance(cached_state, validator_index, withdrawal_credential, validator.pubkey);
+        const withdrawal_credentials = validator.withdrawal_credentials;
+        if (hasCompoundingWithdrawalCredential(&withdrawal_credentials)) {
+            try queueExcessActiveBalance(cached_state, validator_index, &withdrawal_credentials, validator.pubkey);
         }
     }
 }

@@ -22,7 +22,7 @@ pub fn getBlockProposerSignatureSet(allocator: Allocator, cached_state: *CachedB
     const state = cached_state.state;
     const epoch_cache = cached_state.getEpochCache();
     const block = signed_block.message();
-    const domain = try config.getDomain(state.slot(), c.DOMAIN_BEACON_PROPOSER, block.slot());
+    const domain = try config.getDomain(try state.slot(), c.DOMAIN_BEACON_PROPOSER, block.slot());
     // var signing_root: Root = undefined;
     var signing_root_buf: [32]u8 = undefined;
     try computeBlockSigningRoot(allocator, block, domain, &signing_root_buf);

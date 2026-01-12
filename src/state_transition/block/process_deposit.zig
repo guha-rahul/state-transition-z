@@ -33,10 +33,10 @@ pub const DepositData = union(enum) {
         };
     }
 
-    pub fn withdrawalCredentials(self: *const DepositData) WithdrawalCredentials {
+    pub fn withdrawalCredentials(self: *const DepositData) *const WithdrawalCredentials {
         return switch (self.*) {
-            .phase0 => |data| data.withdrawal_credentials,
-            .electra => |data| data.withdrawal_credentials,
+            .phase0 => |data| &data.withdrawal_credentials,
+            .electra => |data| &data.withdrawal_credentials,
         };
     }
 
@@ -62,13 +62,13 @@ pub fn processDeposit(allocator: Allocator, cached_state: *CachedBeaconState, de
     try types.phase0.DepositData.hashTreeRoot(&deposit.data, &deposit_data_root);
 
     var eth1_data = try state.eth1Data();
-    const deposit_root = try eth1_data.get("deposit_root");
+    const deposit_root = try eth1_data.getRoot("deposit_root");
     if (!verifyMerkleBranch(
         deposit_data_root,
         &deposit.proof,
         c.DEPOSIT_CONTRACT_TREE_DEPTH + 1,
         @intCast(try state.eth1DepositIndex()),
-        deposit_root,
+        deposit_root.*,
     )) {
         return error.InvalidMerkleProof;
     }
@@ -84,7 +84,7 @@ pub fn processDeposit(allocator: Allocator, cached_state: *CachedBeaconState, de
 /// Follows applyDeposit() in consensus spec. Will be used by processDeposit() and processDepositRequest()
 pub fn applyDeposit(allocator: Allocator, cached_state: *CachedBeaconState, deposit: *const DepositData) !void {
     const config = cached_state.config;
-    const state = cached_state.state;
+    var state = cached_state.state;
     const epoch_cache = cached_state.getEpochCache();
     const pubkey = deposit.pubkey();
     const withdrawal_credentials = deposit.withdrawalCredentials();
@@ -92,9 +92,9 @@ pub fn applyDeposit(allocator: Allocator, cached_state: *CachedBeaconState, depo
     const signature = deposit.signature();
 
     const cached_index = epoch_cache.getValidatorIndex(&pubkey);
-    const is_new_validator = cached_index == null or cached_index.? >= state.validators().items.len;
+    const is_new_validator = cached_index == null or cached_index.? >= try state.validatorsCount();
 
-    if (state.isPreElectra()) {
+    if (state.forkSeq().lt(.electra)) {
         if (is_new_validator) {
             if (isValidDepositSignature(config, pubkey, withdrawal_credentials, amount, signature)) {
                 try addValidatorToRegistry(allocator, cached_state, pubkey, withdrawal_credentials, amount);
@@ -102,24 +102,25 @@ pub fn applyDeposit(allocator: Allocator, cached_state: *CachedBeaconState, depo
         } else {
             // increase balance by deposit amount right away pre-electra
             const index = cached_index.?;
-            increaseBalance(state, index, amount);
+            try increaseBalance(&state, index, amount);
         }
     } else {
         const pending_deposit = types.electra.PendingDeposit.Type{
             .pubkey = pubkey,
-            .withdrawal_credentials = withdrawal_credentials,
+            .withdrawal_credentials = withdrawal_credentials.*,
             .amount = amount,
             .signature = signature,
             .slot = c.GENESIS_SLOT, // Use GENESIS_SLOT to distinguish from a pending deposit request
         };
 
+        var pending_deposits = try state.pendingDeposits();
         if (is_new_validator) {
             if (isValidDepositSignature(config, pubkey, withdrawal_credentials, amount, signature)) {
                 try addValidatorToRegistry(allocator, cached_state, pubkey, withdrawal_credentials, 0);
-                try state.pendingDeposits().append(allocator, pending_deposit);
+                try pending_deposits.pushValue(&pending_deposit);
             }
         } else {
-            try state.pendingDeposits().append(allocator, pending_deposit);
+            try pending_deposits.pushValue(&pending_deposit);
         }
     }
 }
@@ -128,7 +129,7 @@ pub fn addValidatorToRegistry(
     allocator: Allocator,
     cached_state: *CachedBeaconState,
     pubkey: BLSPubkey,
-    withdrawal_credentials: WithdrawalCredentials,
+    withdrawal_credentials: *const WithdrawalCredentials,
     amount: u64,
 ) !void {
     const epoch_cache = cached_state.getEpochCache();
@@ -142,7 +143,7 @@ pub fn addValidatorToRegistry(
 
     const validator: types.phase0.Validator.Type = .{
         .pubkey = pubkey,
-        .withdrawal_credentials = withdrawal_credentials,
+        .withdrawal_credentials = withdrawal_credentials.*,
         .activation_eligibility_epoch = c.FAR_FUTURE_EPOCH,
         .activation_epoch = c.FAR_FUTURE_EPOCH,
         .exit_epoch = c.FAR_FUTURE_EPOCH,
@@ -180,11 +181,11 @@ pub fn addValidatorToRegistry(
 
 /// refer to https://github.com/ethereum/consensus-specs/blob/v1.5.0/specs/electra/beacon-chain.md#new-is_valid_deposit_signature
 /// no need to return error union since consumer does not care about the reason of failure
-pub fn isValidDepositSignature(config: *const BeaconConfig, pubkey: BLSPubkey, withdrawal_credential: WithdrawalCredentials, amount: u64, deposit_signature: BLSSignature) bool {
+pub fn isValidDepositSignature(config: *const BeaconConfig, pubkey: BLSPubkey, withdrawal_credentials: *const WithdrawalCredentials, amount: u64, deposit_signature: BLSSignature) bool {
     // verify the deposit signature (proof of posession) which is not checked by the deposit contract
     const deposit_message = DepositMessage{
         .pubkey = pubkey,
-        .withdrawal_credentials = withdrawal_credential,
+        .withdrawal_credentials = withdrawal_credentials.*,
         .amount = amount,
     };
 

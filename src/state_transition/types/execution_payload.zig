@@ -1,22 +1,17 @@
 const std = @import("std");
-const types = @import("consensus_types");
+const ct = @import("consensus_types");
+const ForkSeq = @import("config").ForkSeq;
 const Allocator = std.mem.Allocator;
-const Root = types.primitive.Root.Type;
-const ExecutionAddress = types.primitive.ExecutionAddress;
+const Root = ct.primitive.Root.Type;
+const ExecutionAddress = ct.primitive.ExecutionAddress;
 
+// TODO Either make this a union(ForkSeq) or else remove the duplicate union branches
 pub const ExecutionPayload = union(enum) {
-    bellatrix: *const types.bellatrix.ExecutionPayload.Type,
-    capella: *const types.capella.ExecutionPayload.Type,
-    deneb: *const types.deneb.ExecutionPayload.Type,
-    electra: *const types.electra.ExecutionPayload.Type,
-    fulu: *const types.fulu.ExecutionPayload.Type,
-
-    pub fn isCapellaPayload(self: *const ExecutionPayload) bool {
-        return switch (self.*) {
-            .bellatrix => false,
-            else => true,
-        };
-    }
+    bellatrix: ct.bellatrix.ExecutionPayload.Type,
+    capella: ct.capella.ExecutionPayload.Type,
+    deneb: ct.deneb.ExecutionPayload.Type,
+    electra: ct.electra.ExecutionPayload.Type,
+    fulu: ct.fulu.ExecutionPayload.Type,
 
     /// Converts ExecutionPayload to an owned ExecutionPayloadHeader.
     pub fn toPayloadHeader(self: *const ExecutionPayload, allocator: Allocator) !ExecutionPayloadHeader {
@@ -29,56 +24,102 @@ pub const ExecutionPayload = union(enum) {
     pub fn createPayloadHeader(self: *const ExecutionPayload, allocator: Allocator, out: *ExecutionPayloadHeader) !void {
         switch (self.*) {
             .bellatrix => |payload| {
-                const header = try allocator.create(types.bellatrix.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(header);
-                out.* = .{ .bellatrix = header };
-                try toExecutionPayloadHeader(allocator, types.bellatrix.ExecutionPayloadHeader.Type, payload, header);
+                try toExecutionPayloadHeader(
+                    allocator,
+                    ct.bellatrix.ExecutionPayloadHeader.Type,
+                    &payload,
+                    &out.bellatrix,
+                );
                 errdefer out.deinit(allocator);
-                try types.bellatrix.Transactions.hashTreeRoot(allocator, &payload.transactions, &header.transactions_root);
+                try ct.bellatrix.Transactions.hashTreeRoot(
+                    allocator,
+                    &payload.transactions,
+                    &out.bellatrix.transactions_root,
+                );
             },
             .capella => |payload| {
-                const header = try allocator.create(types.capella.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(header);
-                out.* = .{ .capella = header };
-                try toExecutionPayloadHeader(allocator, types.capella.ExecutionPayloadHeader.Type, payload, header);
+                try toExecutionPayloadHeader(
+                    allocator,
+                    ct.capella.ExecutionPayloadHeader.Type,
+                    &payload,
+                    &out.capella,
+                );
                 errdefer out.deinit(allocator);
-                try types.bellatrix.Transactions.hashTreeRoot(allocator, &payload.transactions, &header.transactions_root);
-                try types.capella.Withdrawals.hashTreeRoot(allocator, &payload.withdrawals, &header.withdrawals_root);
+                try ct.bellatrix.Transactions.hashTreeRoot(
+                    allocator,
+                    &payload.transactions,
+                    &out.capella.transactions_root,
+                );
+                try ct.capella.Withdrawals.hashTreeRoot(
+                    allocator,
+                    &payload.withdrawals,
+                    &out.capella.withdrawals_root,
+                );
             },
             .deneb => |payload| {
-                const header = try allocator.create(types.deneb.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(header);
-                out.* = .{ .deneb = header };
-                try toExecutionPayloadHeader(allocator, types.deneb.ExecutionPayloadHeader.Type, payload, header);
+                try toExecutionPayloadHeader(
+                    allocator,
+                    ct.deneb.ExecutionPayloadHeader.Type,
+                    &payload,
+                    &out.deneb,
+                );
                 errdefer out.deinit(allocator);
-                try types.bellatrix.Transactions.hashTreeRoot(allocator, &payload.transactions, &header.transactions_root);
-                try types.capella.Withdrawals.hashTreeRoot(allocator, &payload.withdrawals, &header.withdrawals_root);
-                header.blob_gas_used = payload.blob_gas_used;
-                header.excess_blob_gas = payload.excess_blob_gas;
+                try ct.bellatrix.Transactions.hashTreeRoot(
+                    allocator,
+                    &payload.transactions,
+                    &out.deneb.transactions_root,
+                );
+                try ct.capella.Withdrawals.hashTreeRoot(
+                    allocator,
+                    &payload.withdrawals,
+                    &out.deneb.withdrawals_root,
+                );
+                out.deneb.blob_gas_used = payload.blob_gas_used;
+                out.deneb.excess_blob_gas = payload.excess_blob_gas;
             },
             .electra => |payload| {
                 // Electra reuses Deneb execution payload types.
-                const header = try allocator.create(types.electra.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(header);
-                out.* = .{ .electra = header };
-                try toExecutionPayloadHeader(allocator, types.electra.ExecutionPayloadHeader.Type, payload, header);
+                try toExecutionPayloadHeader(
+                    allocator,
+                    ct.electra.ExecutionPayloadHeader.Type,
+                    &payload,
+                    &out.electra,
+                );
                 errdefer out.deinit(allocator);
-                try types.bellatrix.Transactions.hashTreeRoot(allocator, &payload.transactions, &header.transactions_root);
-                try types.capella.Withdrawals.hashTreeRoot(allocator, &payload.withdrawals, &header.withdrawals_root);
-                header.blob_gas_used = payload.blob_gas_used;
-                header.excess_blob_gas = payload.excess_blob_gas;
+                try ct.bellatrix.Transactions.hashTreeRoot(
+                    allocator,
+                    &payload.transactions,
+                    &out.electra.transactions_root,
+                );
+                try ct.capella.Withdrawals.hashTreeRoot(
+                    allocator,
+                    &payload.withdrawals,
+                    &out.electra.withdrawals_root,
+                );
+                out.electra.blob_gas_used = payload.blob_gas_used;
+                out.electra.excess_blob_gas = payload.excess_blob_gas;
             },
             .fulu => |payload| {
                 // Fulu reuses Electra (which reuses Deneb) execution payload types.
-                const header = try allocator.create(types.fulu.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(header);
-                out.* = .{ .fulu = header };
-                try toExecutionPayloadHeader(allocator, types.fulu.ExecutionPayloadHeader.Type, payload, header);
+                try toExecutionPayloadHeader(
+                    allocator,
+                    ct.fulu.ExecutionPayloadHeader.Type,
+                    &payload,
+                    &out.fulu,
+                );
                 errdefer out.deinit(allocator);
-                try types.bellatrix.Transactions.hashTreeRoot(allocator, &payload.transactions, &header.transactions_root);
-                try types.capella.Withdrawals.hashTreeRoot(allocator, &payload.withdrawals, &header.withdrawals_root);
-                header.blob_gas_used = payload.blob_gas_used;
-                header.excess_blob_gas = payload.excess_blob_gas;
+                try ct.bellatrix.Transactions.hashTreeRoot(
+                    allocator,
+                    &payload.transactions,
+                    &out.fulu.transactions_root,
+                );
+                try ct.capella.Withdrawals.hashTreeRoot(
+                    allocator,
+                    &payload.withdrawals,
+                    &out.fulu.withdrawals_root,
+                );
+                out.fulu.blob_gas_used = payload.blob_gas_used;
+                out.fulu.excess_blob_gas = payload.excess_blob_gas;
             },
         }
     }
@@ -107,7 +148,7 @@ pub const ExecutionPayload = union(enum) {
         };
     }
 
-    pub fn getLogsBloom(self: *const ExecutionPayload) types.bellatrix.LogsBoom.Type {
+    pub fn getLogsBloom(self: *const ExecutionPayload) ct.bellatrix.LogsBoom.Type {
         return switch (self.*) {
             inline .bellatrix, .capella, .deneb, .electra, .fulu => |payload| payload.logs_bloom,
         };
@@ -143,7 +184,7 @@ pub const ExecutionPayload = union(enum) {
         };
     }
 
-    pub fn getExtraData(self: *const ExecutionPayload) types.bellatrix.ExtraData.Type {
+    pub fn getExtraData(self: *const ExecutionPayload) ct.bellatrix.ExtraData.Type {
         return switch (self.*) {
             inline .bellatrix, .capella, .deneb, .electra, .fulu => |payload| payload.extra_data,
         };
@@ -161,13 +202,13 @@ pub const ExecutionPayload = union(enum) {
         };
     }
 
-    pub fn getTransactions(self: *const ExecutionPayload) types.bellatrix.Transactions.Type {
+    pub fn getTransactions(self: *const ExecutionPayload) ct.bellatrix.Transactions.Type {
         return switch (self.*) {
             inline .bellatrix, .capella, .deneb, .electra, .fulu => |payload| payload.transactions,
         };
     }
 
-    pub fn getWithdrawals(self: *const ExecutionPayload) types.capella.Withdrawals.Type {
+    pub fn getWithdrawals(self: *const ExecutionPayload) ct.capella.Withdrawals.Type {
         return switch (self.*) {
             .bellatrix => @panic("Withdrawals are not available in bellatrix"),
             inline .capella, .deneb, .electra, .fulu => |payload| payload.withdrawals,
@@ -189,17 +230,22 @@ pub const ExecutionPayload = union(enum) {
     }
 };
 
+// TODO Either make this a union(ForkSeq) or else remove the duplicate union branches
 pub const ExecutionPayloadHeader = union(enum) {
-    bellatrix: *const types.bellatrix.ExecutionPayloadHeader.Type,
-    capella: *const types.capella.ExecutionPayloadHeader.Type,
-    deneb: *const types.deneb.ExecutionPayloadHeader.Type,
-    electra: *const types.electra.ExecutionPayloadHeader.Type,
-    fulu: *const types.fulu.ExecutionPayloadHeader.Type,
+    bellatrix: ct.bellatrix.ExecutionPayloadHeader.Type,
+    capella: ct.capella.ExecutionPayloadHeader.Type,
+    deneb: ct.deneb.ExecutionPayloadHeader.Type,
+    electra: ct.electra.ExecutionPayloadHeader.Type,
+    fulu: ct.fulu.ExecutionPayloadHeader.Type,
 
-    pub fn isCapellaPayloadHeader(self: *const ExecutionPayloadHeader) bool {
-        return switch (self.*) {
-            .bellatrix => false,
-            else => true,
+    pub fn init(fork_seq: ForkSeq) !ExecutionPayloadHeader {
+        return switch (fork_seq) {
+            .bellatrix => .{ .bellatrix = ct.bellatrix.ExecutionPayloadHeader.default_value },
+            .capella => .{ .capella = ct.capella.ExecutionPayloadHeader.default_value },
+            .deneb => .{ .deneb = ct.deneb.ExecutionPayloadHeader.default_value },
+            .electra => .{ .electra = ct.electra.ExecutionPayloadHeader.default_value },
+            .fulu => .{ .fulu = ct.fulu.ExecutionPayloadHeader.default_value },
+            else => error.UnexpectedForkSeq,
         };
     }
 
@@ -227,7 +273,7 @@ pub const ExecutionPayloadHeader = union(enum) {
         };
     }
 
-    pub fn getLogsBloom(self: *const ExecutionPayloadHeader) types.bellatrix.LogsBoom.Type {
+    pub fn getLogsBloom(self: *const ExecutionPayloadHeader) ct.bellatrix.LogsBoom.Type {
         return switch (self.*) {
             inline .bellatrix, .capella, .deneb, .electra, .fulu => |payload_header| payload_header.logs_bloom,
         };
@@ -263,7 +309,7 @@ pub const ExecutionPayloadHeader = union(enum) {
         };
     }
 
-    pub fn getExtraData(self: *const ExecutionPayloadHeader) types.bellatrix.ExtraData.Type {
+    pub fn getExtraData(self: *const ExecutionPayloadHeader) ct.bellatrix.ExtraData.Type {
         return switch (self.*) {
             inline .bellatrix, .capella, .deneb, .electra, .fulu => |payload_header| payload_header.extra_data,
         };
@@ -311,55 +357,30 @@ pub const ExecutionPayloadHeader = union(enum) {
     pub fn clone(self: *const ExecutionPayloadHeader, allocator: Allocator, out: *ExecutionPayloadHeader) !void {
         switch (self.*) {
             .bellatrix => |header| {
-                const cloned_header = try allocator.create(types.bellatrix.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(cloned_header);
-                out.* = .{ .bellatrix = cloned_header };
-                try types.bellatrix.ExecutionPayloadHeader.clone(allocator, header, cloned_header);
+                try ct.bellatrix.ExecutionPayloadHeader.clone(allocator, &header, &out.bellatrix);
             },
             .capella => |header| {
-                const cloned_header = try allocator.create(types.capella.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(cloned_header);
-                out.* = .{ .capella = cloned_header };
-                try types.capella.ExecutionPayloadHeader.clone(allocator, header, cloned_header);
+                try ct.capella.ExecutionPayloadHeader.clone(allocator, &header, &out.capella);
             },
             .deneb => |header| {
-                const cloned_header = try allocator.create(types.deneb.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(cloned_header);
-                out.* = .{ .deneb = cloned_header };
-                try types.deneb.ExecutionPayloadHeader.clone(allocator, header, cloned_header);
+                try ct.deneb.ExecutionPayloadHeader.clone(allocator, &header, &out.deneb);
             },
             .electra => |header| {
-                const cloned_header = try allocator.create(types.electra.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(cloned_header);
-                out.* = .{ .electra = cloned_header };
-                try types.electra.ExecutionPayloadHeader.clone(allocator, header, cloned_header);
+                try ct.electra.ExecutionPayloadHeader.clone(allocator, &header, &out.electra);
             },
             .fulu => |header| {
-                const cloned_header = try allocator.create(types.fulu.ExecutionPayloadHeader.Type);
-                errdefer allocator.destroy(cloned_header);
-                out.* = .{ .fulu = cloned_header };
-                try types.fulu.ExecutionPayloadHeader.clone(allocator, header, cloned_header);
+                try ct.fulu.ExecutionPayloadHeader.clone(allocator, &header, &out.fulu);
             },
         }
     }
 
     pub fn deinit(self: *ExecutionPayloadHeader, allocator: Allocator) void {
         switch (self.*) {
-            .bellatrix => |header| types.bellatrix.ExecutionPayloadHeader.deinit(allocator, @constCast(header)),
-            .capella => |header| types.capella.ExecutionPayloadHeader.deinit(allocator, @constCast(header)),
-            .deneb => |header| types.deneb.ExecutionPayloadHeader.deinit(allocator, @constCast(header)),
-            .electra => |header| types.electra.ExecutionPayloadHeader.deinit(allocator, @constCast(header)),
-            .fulu => |header| types.fulu.ExecutionPayloadHeader.deinit(allocator, @constCast(header)),
-        }
-    }
-
-    pub fn destroy(self: *const ExecutionPayloadHeader, allocator: Allocator) void {
-        switch (self.*) {
-            .bellatrix => |header| allocator.destroy(@constCast(header)),
-            .capella => |header| allocator.destroy(@constCast(header)),
-            .deneb => |header| allocator.destroy(@constCast(header)),
-            .electra => |header| allocator.destroy(@constCast(header)),
-            .fulu => |header| allocator.destroy(@constCast(header)),
+            .bellatrix => |*header| ct.bellatrix.ExecutionPayloadHeader.deinit(allocator, header),
+            .capella => |*header| ct.capella.ExecutionPayloadHeader.deinit(allocator, header),
+            .deneb => |*header| ct.deneb.ExecutionPayloadHeader.deinit(allocator, header),
+            .electra => |*header| ct.electra.ExecutionPayloadHeader.deinit(allocator, header),
+            .fulu => |*header| ct.fulu.ExecutionPayloadHeader.deinit(allocator, header),
         }
     }
 };
@@ -396,27 +417,27 @@ pub fn toExecutionPayloadHeader(
 }
 
 test "electra - sanity" {
-    const payload = types.electra.ExecutionPayload.Type{
-        .parent_hash = types.primitive.Root.default_value,
-        .fee_recipient = types.primitive.Bytes20.default_value,
-        .state_root = types.primitive.Root.default_value,
-        .receipts_root = types.primitive.Root.default_value,
-        .logs_bloom = types.bellatrix.LogsBloom.default_value,
-        .prev_randao = types.primitive.Root.default_value,
+    const payload = ct.electra.ExecutionPayload.Type{
+        .parent_hash = ct.primitive.Root.default_value,
+        .fee_recipient = ct.primitive.Bytes20.default_value,
+        .state_root = ct.primitive.Root.default_value,
+        .receipts_root = ct.primitive.Root.default_value,
+        .logs_bloom = ct.bellatrix.LogsBloom.default_value,
+        .prev_randao = ct.primitive.Root.default_value,
         .block_number = 12345,
         .gas_limit = 0,
         .gas_used = 0,
         .timestamp = 0,
-        .extra_data = types.bellatrix.ExtraData.default_value,
+        .extra_data = ct.bellatrix.ExtraData.default_value,
         .base_fee_per_gas = 0,
-        .block_hash = types.primitive.Root.default_value,
-        .transactions = types.bellatrix.Transactions.Type{},
-        .withdrawals = types.capella.Withdrawals.Type{},
+        .block_hash = ct.primitive.Root.default_value,
+        .transactions = ct.bellatrix.Transactions.Type{},
+        .withdrawals = ct.capella.Withdrawals.Type{},
         .blob_gas_used = 0,
         .excess_blob_gas = 0,
     };
     const electra_payload: ExecutionPayload = .{ .electra = &payload };
-    var header_out = types.electra.ExecutionPayloadHeader.default_value;
+    var header_out = ct.electra.ExecutionPayloadHeader.default_value;
     var header: ExecutionPayloadHeader = .{ .electra = &header_out };
     try electra_payload.createPayloadHeader(std.testing.allocator, &header);
     defer std.testing.allocator.destroy(header.electra);

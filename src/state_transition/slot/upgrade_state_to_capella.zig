@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const CachedBeaconState = @import("../cache/state_cache.zig").CachedBeaconState;
 const ct = @import("consensus_types");
 const toExecutionPayloadHeader = @import("../types/execution_payload.zig").toExecutionPayloadHeader;
+const ExecutionPayloadHeader = @import("../types/execution_payload.zig").ExecutionPayloadHeader;
 
 pub fn upgradeStateToCapella(allocator: Allocator, cached_state: *CachedBeaconState) !void {
     // Get underlying node and cast bellatrix tree to capella tree
@@ -47,30 +48,30 @@ pub fn upgradeStateToCapella(allocator: Allocator, cached_state: *CachedBeaconSt
         return error.StateIsNotBellatrix;
     }
 
-    const state = try bellatrix_state.upgradeUnsafe();
-    state.forkPtr().* = .{
-        .previous_version = bellatrix_state.fork().getValue("current_version"),
+    var state = try bellatrix_state.upgradeUnsafe();
+
+    const new_fork: ct.phase0.Fork.Type = .{
+        .previous_version = try bellatrix_state.forkCurrentVersion(),
         .current_version = cached_state.config.chain.CAPELLA_FORK_VERSION,
         .epoch = cached_state.getEpochCache().epoch,
     };
+    try state.setFork(&new_fork);
 
-    var capella_latest_execution_payload_header = ct.capella.ExecutionPayloadHeader.default_value;
-    const bellatrix_latest_execution_payload_header = try bellatrix_state.latestExecutionPayloadHeader(allocator);
+    var new_latest_execution_payload_header: ExecutionPayloadHeader = .{ .capella = ct.capella.ExecutionPayloadHeader.default_value };
+    var bellatrix_latest_execution_payload_header = try bellatrix_state.latestExecutionPayloadHeader(allocator);
     defer bellatrix_latest_execution_payload_header.deinit(allocator);
     if (bellatrix_latest_execution_payload_header != .bellatrix) {
         return error.UnexpectedLatestExecutionPayloadHeaderType;
     }
 
-    toExecutionPayloadHeader(
+    try toExecutionPayloadHeader(
         allocator,
         ct.capella.ExecutionPayloadHeader.Type,
-        bellatrix_latest_execution_payload_header.bellatrix,
-        &capella_latest_execution_payload_header,
+        &bellatrix_latest_execution_payload_header.bellatrix,
+        &new_latest_execution_payload_header.capella,
     );
     // new in capella
-    capella_latest_execution_payload_header.withdrawals_root = [_]u8{0} ** 32;
+    new_latest_execution_payload_header.capella.withdrawals_root = [_]u8{0} ** 32;
 
-    state.setLatestExecutionPayloadHeader(allocator, .{
-        .capella = &capella_latest_execution_payload_header,
-    });
+    try state.setLatestExecutionPayloadHeader(&new_latest_execution_payload_header);
 }

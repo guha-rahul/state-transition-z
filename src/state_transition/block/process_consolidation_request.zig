@@ -63,8 +63,8 @@ pub fn processConsolidationRequest(
     var validators = try state.validators();
     var source_validator = try validators.get(@intCast(source_index));
     var target_validator = try validators.get(@intCast(target_index));
-    const source_withdrawal_credentials = try source_validator.get("withdrawal_credentials");
-    const target_withdrawal_credentials = try target_validator.get("withdrawal_credentials");
+    const source_withdrawal_credentials = try source_validator.getRoot("withdrawal_credentials");
+    const target_withdrawal_credentials = try target_validator.getRoot("withdrawal_credentials");
     const source_withdrawal_address = source_withdrawal_credentials[12..];
     const current_epoch = epoch_cache.epoch;
 
@@ -106,7 +106,7 @@ pub fn processConsolidationRequest(
     // Initiate source validator exit and append pending consolidation
     // TODO Electra: See if we can get rid of big int
     const effective_balance = try source_validator.get("effective_balance");
-    const exit_epoch = computeConsolidationEpochAndUpdateChurn(cached_state, effective_balance);
+    const exit_epoch = try computeConsolidationEpochAndUpdateChurn(cached_state, effective_balance);
     try source_validator.set("exit_epoch", exit_epoch);
     try source_validator.set("withdrawable_epoch", exit_epoch + config.chain.MIN_VALIDATOR_WITHDRAWABILITY_DELAY);
 
@@ -132,7 +132,7 @@ fn isValidSwitchToCompoundRequest(cached_state: *const CachedBeaconState, consol
 
     var validators = try state.validators();
     var source_validator = try validators.get(@intCast(source_index));
-    const source_withdrawal_credentials = try source_validator.get("withdrawal_credentials");
+    const source_withdrawal_credentials = try source_validator.getRoot("withdrawal_credentials");
     const source_withdrawal_address = source_withdrawal_credentials[12..];
 
     // Verify request has been authorized

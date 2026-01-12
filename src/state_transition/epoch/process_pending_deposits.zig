@@ -117,16 +117,16 @@ fn applyPendingDeposit(allocator: Allocator, cached_state: *CachedBeaconState, d
     const validator_index = epoch_cache.getValidatorIndex(&deposit.pubkey) orelse null;
     const pubkey = deposit.pubkey;
     // TODO: is this withdrawal_credential(s) the same to spec?
-    const withdrawal_credential = deposit.withdrawal_credentials;
+    const withdrawal_credentials = &deposit.withdrawal_credentials;
     const amount = deposit.amount;
     const signature = deposit.signature;
     const is_validator_known = try isValidatorKnown(&state, validator_index);
 
     if (!is_validator_known) {
         // Verify the deposit signature (proof of possession) which is not checked by the deposit contract
-        if (isValidDepositSignature(cached_state.config, pubkey, withdrawal_credential, amount, signature)) {
-            try addValidatorToRegistry(allocator, cached_state, pubkey, withdrawal_credential, amount);
-            try cache.is_compounding_validator_arr.append(hasCompoundingWithdrawalCredential(withdrawal_credential));
+        if (isValidDepositSignature(cached_state.config, pubkey, withdrawal_credentials, amount, signature)) {
+            try addValidatorToRegistry(allocator, cached_state, pubkey, withdrawal_credentials, amount);
+            try cache.is_compounding_validator_arr.append(hasCompoundingWithdrawalCredential(withdrawal_credentials));
             // set balance, so that the next deposit of same pubkey will increase the balance correctly
             // this is to fix the double deposit issue found in mekong
             // see https://github.com/ChainSafe/lodestar/pull/7255

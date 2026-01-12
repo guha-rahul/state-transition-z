@@ -529,19 +529,19 @@ pub const BeaconState = union(ForkSeq) {
         return switch (self.*) {
             .phase0, .altair => error.InvalidAtFork,
             .bellatrix => |state| .{
-                .bellatrix = (try state.get("latest_execution_payload_header")).toValue(allocator),
+                .bellatrix = try state.getValue(allocator, "latest_execution_payload_header"),
             },
             .capella => |state| .{
-                .capella = (try state.get("latest_execution_payload_header")).toValue(allocator),
+                .capella = try state.getValue(allocator, "latest_execution_payload_header"),
             },
             .deneb => |state| .{
-                .deneb = (try state.get("latest_execution_payload_header")).toValue(allocator),
+                .deneb = try state.getValue(allocator, "latest_execution_payload_header"),
             },
             .electra => |state| .{
-                .deneb = (try state.get("latest_execution_payload_header")).toValue(allocator),
+                .deneb = try state.getValue(allocator, "latest_execution_payload_header"),
             },
             .fulu => |state| .{
-                .deneb = (try state.get("latest_execution_payload_header")).toValue(allocator),
+                .deneb = try state.getValue(allocator, "latest_execution_payload_header"),
             },
         };
     }
@@ -558,13 +558,13 @@ pub const BeaconState = union(ForkSeq) {
 
     // `header` ownership is transferred to BeaconState and will be deinit when state is deinit
     // caller must guarantee that `header` is properly initialized and allocated/cloned with `allocator` and no longer used after this call
-    pub fn setLatestExecutionPayloadHeader(self: *BeaconState, header: ExecutionPayloadHeader) !void {
+    pub fn setLatestExecutionPayloadHeader(self: *BeaconState, header: *const ExecutionPayloadHeader) !void {
         switch (self.*) {
-            .bellatrix => |*state| try state.setValue("latest_execution_payload_header", header.bellatrix),
-            .capella => |*state| try state.setValue("latest_execution_payload_header", header.capella),
-            .deneb => |*state| try state.setValue("latest_execution_payload_header", header.deneb),
-            .electra => |*state| try state.setValue("latest_execution_payload_header", header.deneb),
-            .fulu => |*state| try state.setValue("latest_execution_payload_header", header.deneb),
+            .bellatrix => |*state| try state.setValue("latest_execution_payload_header", &header.bellatrix),
+            .capella => |*state| try state.setValue("latest_execution_payload_header", &header.capella),
+            .deneb => |*state| try state.setValue("latest_execution_payload_header", &header.deneb),
+            .electra => |*state| try state.setValue("latest_execution_payload_header", &header.electra),
+            .fulu => |*state| try state.setValue("latest_execution_payload_header", &header.fulu),
             else => return error.InvalidAtFork,
         }
     }

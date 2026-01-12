@@ -35,7 +35,7 @@ pub fn isValidBlsToExecutionChange(cached_state: *CachedBeaconState, signed_bls_
     }
 
     const validator = try validators.get(@intCast(validator_index));
-    const withdrawal_credentials = try validator.get("withdrawal_credentials");
+    const withdrawal_credentials = try validator.getRoot("withdrawal_credentials");
     if (withdrawal_credentials[0] != c.BLS_WITHDRAWAL_PREFIX) {
         return error.InvalidWithdrawalCredentialsPrefix;
     }
@@ -44,7 +44,7 @@ pub fn isValidBlsToExecutionChange(cached_state: *CachedBeaconState, signed_bls_
     digest(&address_change.from_bls_pubkey, &digest_credentials);
     // Set the BLS_WITHDRAWAL_PREFIX on the digest_credentials for direct match
     digest_credentials[0] = c.BLS_WITHDRAWAL_PREFIX;
-    if (!std.mem.eql(u8, &withdrawal_credentials, &digest_credentials)) {
+    if (!std.mem.eql(u8, withdrawal_credentials, &digest_credentials)) {
         return error.InvalidWithdrawalCredentials;
     }
 

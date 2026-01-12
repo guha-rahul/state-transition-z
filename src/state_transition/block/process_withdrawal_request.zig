@@ -57,7 +57,7 @@ pub fn processWithdrawalRequest(cached_state: *CachedBeaconState, withdrawal_req
 
     // partial withdrawal request
     const effective_balance = try validator.get("effective_balance");
-    const withdrawal_credentials = try validator.get("withdrawal_credentials");
+    const withdrawal_credentials = try validator.getRoot("withdrawal_credentials");
 
     const has_sufficient_effective_balance = effective_balance >= preset.MIN_ACTIVATION_BALANCE;
     const has_excess_balance = validator_balance > preset.MIN_ACTIVATION_BALANCE + pending_balance_to_withdraw;
@@ -68,7 +68,7 @@ pub fn processWithdrawalRequest(cached_state: *CachedBeaconState, withdrawal_req
         has_excess_balance)
     {
         const amount_to_withdraw = @min(validator_balance - preset.MIN_ACTIVATION_BALANCE - pending_balance_to_withdraw, amount);
-        const exit_queue_epoch = computeExitEpochAndUpdateChurn(cached_state, amount_to_withdraw);
+        const exit_queue_epoch = try computeExitEpochAndUpdateChurn(cached_state, amount_to_withdraw);
         const withdrawable_epoch = exit_queue_epoch + config.chain.MIN_VALIDATOR_WITHDRAWABILITY_DELAY;
 
         const pending_partial_withdrawal = PendingPartialWithdrawal{
@@ -81,7 +81,7 @@ pub fn processWithdrawalRequest(cached_state: *CachedBeaconState, withdrawal_req
 }
 
 fn isValidatorEligibleForWithdrawOrExit(validator: *types.phase0.Validator.TreeView, source_address: []const u8, cached_state: *const CachedBeaconState) !bool {
-    const withdrawal_credentials = try validator.get("withdrawal_credentials");
+    const withdrawal_credentials = try validator.getRoot("withdrawal_credentials");
     const address = withdrawal_credentials[12..];
     const epoch_cache = cached_state.getEpochCache();
     const config = epoch_cache.config;

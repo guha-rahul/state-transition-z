@@ -66,7 +66,7 @@ pub fn processSlotsWithTransientCache(
     if (try state.slot() > slot) return error.outdatedSlot;
 
     while (try state.slot() < slot) {
-        try processSlot(allocator, post_state);
+        try processSlot(post_state);
 
         const next_slot = try state.slot() + 1;
         if (next_slot % preset.SLOTS_PER_EPOCH == 0) {
@@ -184,18 +184,17 @@ pub fn stateTransition(
 
     // Verify state root
     if (opts.verify_state_root) {
-        var post_state_root: [32]u8 = undefined;
         //    const hashTreeRootTimer = metrics?.stateHashTreeRootTime.startTimer({
         //      source: StateHashTreeRootSource.stateTransition,
         //    });
-        try post_state.state.hashTreeRoot(allocator, &post_state_root);
+        const post_state_root = try post_state.state.hashTreeRoot();
         //    hashTreeRootTimer?.();
 
         const block_state_root = switch (block) {
             .regular => |b| b.stateRoot(),
             .blinded => |b| b.stateRoot(),
         };
-        if (!std.mem.eql(u8, &post_state_root, &block_state_root)) {
+        if (!std.mem.eql(u8, post_state_root, &block_state_root)) {
             return error.InvalidStateRoot;
         }
     }

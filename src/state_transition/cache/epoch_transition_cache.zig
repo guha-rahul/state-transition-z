@@ -215,8 +215,7 @@ pub const EpochTransitionCache = struct {
         var indices_to_eject = std.ArrayList(ValidatorIndex).init(allocator);
 
         var total_active_stake_by_increment: u64 = 0;
-        var validators_view = try state.validators();
-        const validators = try validators_view.getAllReadonlyValues(allocator);
+        const validators = try state.validatorsSlice(allocator);
         defer allocator.free(validators);
         const validator_count = validators.len;
 
@@ -260,7 +259,7 @@ pub const EpochTransitionCache = struct {
             reused_cache.flags.items[i] = flag;
 
             if (fork_seq.gte(.electra)) {
-                reused_cache.is_compounding_validator_arr.items[i] = hasCompoundingWithdrawalCredential(validator.withdrawal_credentials);
+                reused_cache.is_compounding_validator_arr.items[i] = hasCompoundingWithdrawalCredential(&validator.withdrawal_credentials);
             }
 
             if (is_active_curr) {

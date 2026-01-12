@@ -66,7 +66,7 @@ pub fn processOperations(
 
     if (state.forkSeq().gte(.electra)) {
         for (body.depositRequests()) |*deposit_request| {
-            try processDepositRequest(allocator, cached_state, deposit_request);
+            try processDepositRequest(cached_state, deposit_request);
         }
 
         for (body.withdrawalRequests()) |*withdrawal_request| {

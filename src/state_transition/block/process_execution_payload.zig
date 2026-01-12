@@ -96,12 +96,12 @@ pub fn processExecutionPayload(
         return error.InvalidExecutionPayload;
     }
 
-    var payload_header: ExecutionPayloadHeader = undefined;
+    var payload_header = try ExecutionPayloadHeader.init(state.forkSeq());
     switch (body) {
         .regular => |b| try b.executionPayload().createPayloadHeader(allocator, &payload_header),
         .blinded => |b| try b.executionPayloadHeader().clone(allocator, &payload_header),
     }
-    defer payload_header.destroy(allocator);
+    defer payload_header.deinit(allocator);
 
-    try state.setLatestExecutionPayloadHeader(payload_header);
+    try state.setLatestExecutionPayloadHeader(&payload_header);
 }

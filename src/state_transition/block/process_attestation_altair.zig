@@ -29,10 +29,10 @@ const SLOTS_PER_EPOCH_SQRT = std.math.sqrt(preset.SLOTS_PER_EPOCH);
 /// for phase0 it's `types.phase0.Attestation.Type`
 /// for electra it's `types.electra.Attestation.Type`
 pub fn processAttestationsAltair(allocator: Allocator, cached_state: *const CachedBeaconState, comptime AT: type, attestations: []AT, verify_signature: bool) !void {
-    const state = cached_state.state;
+    var state = cached_state.state;
     const epoch_cache = cached_state.getEpochCache();
     const effective_balance_increments = epoch_cache.effective_balance_increment.get().items;
-    const state_slot = state.slot();
+    const state_slot = try state.slot();
     const current_epoch = epoch_cache.epoch;
 
     const root_cache = try RootCache.init(allocator, cached_state);
@@ -64,22 +64,22 @@ pub fn processAttestationsAltair(allocator: Allocator, cached_state: *const Cach
         }
 
         const in_current_epoch = data.target.epoch == current_epoch;
-        var epoch_participation = if (in_current_epoch) state.currentEpochParticipations().items else state.previousEpochParticipations().items;
-        const flags_attestation = try getAttestationParticipationStatus(state, data, state_slot - data.slot, current_epoch, root_cache);
+        var epoch_participation = if (in_current_epoch) try state.currentEpochParticipation() else try state.previousEpochParticipation();
+        const flags_attestation = try getAttestationParticipationStatus(&state, data, state_slot - data.slot, current_epoch, root_cache);
 
         // For each participant, update their participation
         // In epoch processing, this participation info is used to calculate balance updates
         var total_balance_increments_with_weight: u64 = 0;
-        const validators = state.validators().items;
+        var validators = try state.validators();
         for (attesting_indices.items) |validator_index| {
-            const flags = epoch_participation[validator_index];
+            const flags = try epoch_participation.get(validator_index);
 
             // For normal block, > 90% of attestations belong to current epoch
             // At epoch boundary, 100% of attestations belong to previous epoch
             // so we want to update the participation flag tree in batch
 
             // no setBitwiseOR implemented in zig ssz, so we do it manually here
-            epoch_participation[validator_index] = flags_attestation | flags;
+            try epoch_participation.set(validator_index, flags_attestation | flags);
 
             // Returns flags that are NOT set before (~ bitwise NOT) AND are set after
             const flags_new_set = ~flags & flags_attestation;
@@ -99,8 +99,9 @@ pub fn processAttestationsAltair(allocator: Allocator, cached_state: *const Cach
             // TODO: describe issue. Compute progressive target balances
             // When processing each attestation, increase the cummulative target balance. Only applies post-altair
             if ((flags_new_set & TIMELY_TARGET) == TIMELY_TARGET) {
-                const validator = validators[validator_index];
-                if (!validator.slashed) {
+                var validator = try validators.get(validator_index);
+                const slashed = try validator.get("slashed");
+                if (!slashed) {
                     if (in_current_epoch) {
                         epoch_cache.current_target_unslashed_balance_increments += effective_balance_increments[validator_index];
                     } else {
@@ -114,7 +115,7 @@ pub fn processAttestationsAltair(allocator: Allocator, cached_state: *const Cach
         const proposer_reward_numerator = total_increments * epoch_cache.base_reward_per_increment;
         proposer_reward += @divFloor(proposer_reward_numerator, PROPOSER_REWARD_DOMINATOR);
     }
-    increaseBalance(state, try cached_state.getBeaconProposer(state_slot), proposer_reward);
+    try increaseBalance(&state, try cached_state.getBeaconProposer(state_slot), proposer_reward);
 }
 
 pub fn getAttestationParticipationStatus(state: *const BeaconState, data: types.phase0.AttestationData.Type, inclusion_delay: u64, current_epoch: Epoch, root_cache: *RootCache) !u8 {
@@ -125,11 +126,11 @@ pub fn getAttestationParticipationStatus(state: *const BeaconState, data: types.
     const is_matching_source = checkpointValueEquals(data.source, justified_checkpoint);
     if (!is_matching_source) return error.InvalidAttestationSource;
 
-    const is_matching_target = std.mem.eql(u8, &data.target.root, &try root_cache.getBlockRoot(data.target.epoch));
+    const is_matching_target = std.mem.eql(u8, &data.target.root, try root_cache.getBlockRoot(data.target.epoch));
 
     // a timely head is only be set if the target is _also_ matching
     const is_matching_head =
-        is_matching_target and std.mem.eql(u8, &data.beacon_block_root, &try root_cache.getBlockRootAtSlot(data.slot));
+        is_matching_target and std.mem.eql(u8, &data.beacon_block_root, try root_cache.getBlockRootAtSlot(data.slot));
 
     var flags: u8 = 0;
     if (is_matching_source and inclusion_delay <= SLOTS_PER_EPOCH_SQRT) flags |= TIMELY_SOURCE;

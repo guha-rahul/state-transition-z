@@ -74,7 +74,7 @@ pub fn getConsolidationChurnLimit(epoch_cache: *const EpochCache) u64 {
     return getBalanceChurnLimitFromCache(epoch_cache) - getActivationExitChurnLimit(epoch_cache);
 }
 
-pub fn getMaxEffectiveBalance(withdrawal_credentials: WithdrawalCredentials) u64 {
+pub fn getMaxEffectiveBalance(withdrawal_credentials: *const WithdrawalCredentials) u64 {
     // Compounding withdrawal credential only available since Electra
     if (hasCompoundingWithdrawalCredential(withdrawal_credentials)) {
         return preset.MAX_EFFECTIVE_BALANCE_ELECTRA;

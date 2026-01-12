@@ -443,7 +443,7 @@ pub const EpochCache = struct {
         std.mem.copyForwards(ValidatorIndex, next_shuffling_active_indices, epoch_transition_cache.next_shuffling_active_indices);
         const next_shuffling = try computeEpochShuffling(
             self.allocator,
-            state,
+            &state,
             next_shuffling_active_indices,
             epoch_after_upcoming,
         );
@@ -482,13 +482,14 @@ pub const EpochCache = struct {
         // Proposers are to be computed pre-fulu to be cached within `self`.
         if (self.epoch >= self.config.chain.FULU_FORK_EPOCH) {
             var proposer_lookahead = try state.proposerLookahead();
+            self.proposers_next_epoch = undefined;
             for (0..preset.SLOTS_PER_EPOCH) |i| {
                 self.proposers[i] = @intCast(try proposer_lookahead.get(i));
-                self.proposers_next_epoch[i] = @intCast(try proposer_lookahead.get(preset.SLOTS_PER_EPOCH + i));
+                self.proposers_next_epoch.?[i] = @intCast(try proposer_lookahead.get(preset.SLOTS_PER_EPOCH + i));
             }
         } else {
             var upcoming_proposer_seed: [32]u8 = undefined;
-            try getSeed(state, self.epoch, c.DOMAIN_BEACON_PROPOSER, &upcoming_proposer_seed);
+            try getSeed(&state, self.epoch, c.DOMAIN_BEACON_PROPOSER, &upcoming_proposer_seed);
             try computeProposers(
                 self.allocator,
                 self.config.forkSeqAtEpoch(self.epoch),
