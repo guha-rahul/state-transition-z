@@ -10,7 +10,7 @@ test "processEffectiveBalanceUpdates - sanity" {
     try TestRunner(
         state_transition.processEffectiveBalanceUpdates,
         .{
-            .alloc = false,
+            .alloc = true,
             .err_return = true,
             .void_return = false,
         },
