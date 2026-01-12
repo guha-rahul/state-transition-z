@@ -209,6 +209,7 @@
                     .preset,
                     .constants,
                     .blst,
+                    .persistent_merkle_tree,
                 },
             },
             .filters = .{},

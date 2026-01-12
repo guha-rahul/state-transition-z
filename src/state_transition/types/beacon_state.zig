@@ -646,6 +646,13 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    pub fn setPendingDeposits(self: *BeaconState, deposits: ct.electra.PendingDeposits.TreeView) !void {
+        return switch (self.*) {
+            .phase0, .altair, .bellatrix, .capella, .deneb => error.InvalidAtFork,
+            inline else => |*state| try state.set("pending_deposits", deposits),
+        };
+    }
+
     pub fn pendingPartialWithdrawals(self: *const BeaconState) !ct.electra.PendingPartialWithdrawals.TreeView {
         return switch (self.*) {
             .phase0, .altair, .bellatrix, .capella, .deneb => error.InvalidAtFork,

@@ -131,14 +131,14 @@ pub fn addValidatorToRegistry(
 ) !void {
     const epoch_cache = cached_state.getEpochCache();
     const state = cached_state.state;
-    const validators = state.validators();
+    var validators = try state.validators();
     // add validator and balance entries
     const effective_balance = @min(
         amount - (amount % preset.EFFECTIVE_BALANCE_INCREMENT),
-        if (state.isPreElectra()) preset.MAX_EFFECTIVE_BALANCE else getMaxEffectiveBalance(withdrawal_credentials),
+        if (state.forkSeq().lt(.electra)) preset.MAX_EFFECTIVE_BALANCE else getMaxEffectiveBalance(withdrawal_credentials),
     );
 
-    try validators.append(allocator, .{
+    const validator: types.phase0.Validator.Type = .{
         .pubkey = pubkey,
         .withdrawal_credentials = withdrawal_credentials,
         .activation_eligibility_epoch = c.FAR_FUTURE_EPOCH,
@@ -147,9 +147,10 @@ pub fn addValidatorToRegistry(
         .withdrawable_epoch = c.FAR_FUTURE_EPOCH,
         .effective_balance = effective_balance,
         .slashed = false,
-    });
+    };
+    try validators.pushValue(&validator);
 
-    const validator_index = validators.items.len - 1;
+    const validator_index = (try validators.length()) - 1;
     // TODO Electra: Review this
     // Updating here is better than updating at once on epoch transition
     // - Simplify genesis fn applyDeposits(): effectiveBalanceIncrements is populated immediately
@@ -161,18 +162,18 @@ pub fn addValidatorToRegistry(
     try epoch_cache.addPubkey(validator_index, pubkey);
 
     // Only after altair:
-    if (state.isPostAltair()) {
-        const inactivity_scores = state.inactivityScores();
-        try inactivity_scores.append(allocator, 0);
+    if (state.forkSeq().gte(.altair)) {
+        var inactivity_scores = try state.inactivityScores();
+        try inactivity_scores.push(0);
 
         // add participation caches
-        try state.previousEpochParticipations().append(allocator, 0);
-        const state_current_epoch_participations = state.currentEpochParticipations();
-        try state_current_epoch_participations.append(allocator, 0);
+        var previous_epoch_participation = try state.previousEpochParticipation();
+        try previous_epoch_participation.push(0);
+        var state_current_epoch_participation = try state.currentEpochParticipation();
+        try state_current_epoch_participation.push(0);
     }
-    const balances = state.balances();
-
-    try balances.append(allocator, amount);
+    var balances = try state.balances();
+    try balances.push(amount);
 }
 
 /// refer to https://github.com/ethereum/consensus-specs/blob/v1.5.0/specs/electra/beacon-chain.md#new-is_valid_deposit_signature

@@ -950,6 +950,7 @@ pub fn build(b: *std.Build) void {
     module_int.addImport("preset", module_preset);
     module_int.addImport("constants", module_constants);
     module_int.addImport("blst", dep_blst.module("blst"));
+    module_int.addImport("persistent_merkle_tree", module_persistent_merkle_tree);
 
     module_int_slow.addImport("config", module_config);
     module_int_slow.addImport("download_era_options", options_module_download_era_options);

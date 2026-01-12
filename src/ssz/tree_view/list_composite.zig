@@ -86,6 +86,13 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
             return try Chunks.get(&self.base_view, index);
         }
 
+        pub fn getValue(self: *Self, allocator: Allocator, index: usize) !ST.Element.Type {
+            var child_view = try self.get(index);
+            var out = ST.Element.default_value;
+            try child_view.toValue(allocator, &out);
+            return out;
+        }
+
         pub fn getReadonly(self: *Self, index: usize) !Element {
             // TODO: Implement read-only access after other PRs land.
             _ = self;
@@ -141,6 +148,18 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
 
             try self.updateListLength(list_length + 1);
             try self.set(list_length, value);
+        }
+
+        pub fn pushValue(self: *Self, value: *const ST.Element.Type) !void {
+            const root = try ST.Element.tree.fromValue(self.base_view.pool, value);
+            errdefer self.base_view.pool.unref(root);
+            var child_view = try ST.Element.TreeView.init(
+                self.base_view.allocator,
+                self.base_view.pool,
+                root,
+            );
+            errdefer child_view.deinit();
+            try self.push(child_view);
         }
 
         /// Return a new view containing all elements up to and including `index`.
