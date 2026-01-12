@@ -408,8 +408,8 @@ pub const BeaconState = union(ForkSeq) {
         return switch (self.*) {
             .phase0 => error.InvalidAtFork,
             inline else => |*state| {
-                const current_epoch_participation = try state.get("current_epoch_participation");
-                try state.set("previous_epoch_participation", current_epoch_participation);
+                var current_epoch_participation = try state.get("current_epoch_participation");
+                try state.set("previous_epoch_participation", try current_epoch_participation.clone(.{}));
                 try state.setValue("current_epoch_participation", &ct.altair.EpochParticipation.default_value);
             },
         };
