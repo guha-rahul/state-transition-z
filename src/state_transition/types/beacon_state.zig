@@ -682,11 +682,10 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
-    pub fn setPendingConsolidations(self: *BeaconState, pending_consolidations: ct.electra.PendingConsolidations.TreeView) !void {
+    pub fn setPendingConsolidations(self: *BeaconState, consolidations: ct.electra.PendingConsolidations.TreeView) !void {
         return switch (self.*) {
             .phase0, .altair, .bellatrix, .capella, .deneb => error.InvalidAtFork,
-            .electra => |*state| try state.set("pending_consolidations", pending_consolidations),
-            .fulu => |*state| try state.set("pending_consolidations", pending_consolidations),
+            inline else => |*state| try state.set("pending_consolidations", consolidations),
         };
     }
 
