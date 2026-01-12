@@ -230,9 +230,21 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    pub fn blockRootsRoot(self: *const BeaconState) !*const [32]u8 {
+        return switch (self.*) {
+            inline else => |state| try state.getRoot("block_roots"),
+        };
+    }
+
     pub fn stateRoots(self: *const BeaconState) !ct.phase0.HistoricalStateRoots.TreeView {
         return switch (self.*) {
             inline else => |state| try state.get("state_roots"),
+        };
+    }
+
+    pub fn stateRootsRoot(self: *const BeaconState) !*const [32]u8 {
+        return switch (self.*) {
+            inline else => |state| try state.getRoot("state_roots"),
         };
     }
 

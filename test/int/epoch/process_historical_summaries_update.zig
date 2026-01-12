@@ -8,7 +8,7 @@ const TestRunner = @import("./test_runner.zig").TestRunner;
 
 test "processHistoricalSummariesUpdate - sanity" {
     try TestRunner(state_transition.processHistoricalSummariesUpdate, .{
-        .alloc = true,
+        .alloc = false,
         .err_return = true,
         .void_return = true,
     }).testProcessEpochFn();
