@@ -181,6 +181,13 @@ pub fn CompositeChunks(
             try base_view.data.root.getNodesAtDepth(base_view.pool, chunk_depth, 0, nodes);
 
             for (nodes, 0..) |node, i| {
+                // Some variable-size value types (e.g. BitList) expect the output value to start in a valid
+                // initialized state because `toValue()` may call methods like `resize()` which assume internal
+                // buffers/sentinels are well-formed. Initialize with `default_value` to avoid mutating
+                // uninitialized memory during bulk reads.
+                if (comptime @hasDecl(ST.Element, "default_value")) {
+                    values[i] = ST.Element.default_value;
+                }
                 if (comptime isFixedType(ST.Element)) {
                     try ST.Element.tree.toValue(node, base_view.pool, &values[i]);
                 } else {

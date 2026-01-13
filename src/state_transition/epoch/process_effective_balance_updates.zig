@@ -17,6 +17,7 @@ const UPWARD_THRESHOLD = HYSTERESIS_INCREMENT * preset.HYSTERESIS_UPWARD_MULTIPL
 /// this function also update EpochTransitionCache
 pub fn processEffectiveBalanceUpdates(allocator: Allocator, cached_state: *CachedBeaconState, cache: *EpochTransitionCache) !usize {
     const state = cached_state.state;
+    const fork = state.forkSeq();
     const epoch_cache = cached_state.getEpochCache();
     var validators = try state.validators();
     const effective_balance_increments = epoch_cache.getEffectiveBalanceIncrements().items;
@@ -36,14 +37,18 @@ pub fn processEffectiveBalanceUpdates(allocator: Allocator, cached_state: *Cache
     };
     const is_compounding_validator_arr = cache.is_compounding_validator_arr.items;
 
-    var previous_epoch_participation = try state.previousEpochParticipation();
-    var current_epoch_participation = try state.currentEpochParticipation();
+    var previous_epoch_participation: types.altair.EpochParticipation.TreeView = undefined;
+    var current_epoch_participation: types.altair.EpochParticipation.TreeView = undefined;
+    if (fork.gte(.altair)) {
+        previous_epoch_participation = try state.previousEpochParticipation();
+        current_epoch_participation = try state.currentEpochParticipation();
+    }
 
     var num_update: usize = 0;
     for (balances, 0..) |balance, i| {
         var effective_balance_increment = effective_balance_increments[i];
         var effective_balance = @as(u64, effective_balance_increment) * preset.EFFECTIVE_BALANCE_INCREMENT;
-        const effective_balance_limit: u64 = if (state.forkSeq().lt(.electra)) preset.MAX_EFFECTIVE_BALANCE else blk: {
+        const effective_balance_limit: u64 = if (fork.lt(.electra)) preset.MAX_EFFECTIVE_BALANCE else blk: {
             // from electra, effectiveBalanceLimit is per validator
             if (is_compounding_validator_arr[i]) {
                 break :blk preset.MAX_EFFECTIVE_BALANCE_ELECTRA;
@@ -71,7 +76,7 @@ pub fn processEffectiveBalanceUpdates(allocator: Allocator, cached_state: *Cache
 
             // TODO: describe issue. Compute progressive target balances
             // Must update target balances for consistency, see comments below
-            if (state.forkSeq().gte(.altair)) {
+            if (fork.gte(.altair)) {
                 const slashed = try validator.get("slashed");
                 if (!slashed) {
                     if ((try previous_epoch_participation.get(i)) & TIMELY_TARGET == TIMELY_TARGET) {

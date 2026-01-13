@@ -132,7 +132,7 @@ pub fn validateAttestation(comptime AT: type, cached_state: *const CachedBeaconS
     }
 }
 
-pub fn isTimelyTarget(state: *const BeaconState, inclusion_distance: Slot) bool {
+pub fn isTimelyTarget(state: *BeaconState, inclusion_distance: Slot) bool {
     // post deneb attestation is valid till end of next epoch for target
     if (state.forkSeq().gte(.deneb)) {
         return true;

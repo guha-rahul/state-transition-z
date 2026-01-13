@@ -394,8 +394,16 @@ pub const BeaconState = union(ForkSeq) {
     pub fn rotateEpochPendingAttestations(self: *BeaconState) !void {
         return switch (self.*) {
             .phase0 => |*state| {
-                const current_epoch_attestations = try state.get("current_epoch_attestations");
-                try state.set("previous_epoch_attestations", current_epoch_attestations);
+                var current_epoch_attestations = try state.get("current_epoch_attestations");
+                // TODO: Align with lodestar-ts rotate semantics (move root / avoid extra work).
+                // `current_epoch_attestations` is a borrowed subview into `state`'s caches.
+                // Do not pass it to `set()`, which transfers ownership and may later deinit the same TreeViewData.
+                // Clone to get an independent owned view.
+                var cloned: ?ct.phase0.EpochAttestations.TreeView = try current_epoch_attestations.clone(.{ .transfer_cache = false });
+                errdefer if (cloned) |*v| v.deinit();
+
+                try state.set("previous_epoch_attestations", cloned.?);
+                cloned = null;
                 try state.setValue("current_epoch_attestations", &ct.phase0.EpochAttestations.default_value);
             },
             else => error.InvalidAtFork,
