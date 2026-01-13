@@ -24,6 +24,7 @@ pub const ExecutionPayload = union(enum) {
     pub fn createPayloadHeader(self: *const ExecutionPayload, allocator: Allocator, out: *ExecutionPayloadHeader) !void {
         switch (self.*) {
             .bellatrix => |payload| {
+                out.* = .{ .bellatrix = undefined };
                 try toExecutionPayloadHeader(
                     allocator,
                     ct.bellatrix.ExecutionPayloadHeader.Type,
@@ -38,6 +39,7 @@ pub const ExecutionPayload = union(enum) {
                 );
             },
             .capella => |payload| {
+                out.* = .{ .capella = undefined };
                 try toExecutionPayloadHeader(
                     allocator,
                     ct.capella.ExecutionPayloadHeader.Type,
@@ -57,6 +59,7 @@ pub const ExecutionPayload = union(enum) {
                 );
             },
             .deneb => |payload| {
+                out.* = .{ .deneb = undefined };
                 try toExecutionPayloadHeader(
                     allocator,
                     ct.deneb.ExecutionPayloadHeader.Type,
@@ -78,6 +81,7 @@ pub const ExecutionPayload = union(enum) {
                 out.deneb.excess_blob_gas = payload.excess_blob_gas;
             },
             .electra => |payload| {
+                out.* = .{ .electra = undefined };
                 // Electra reuses Deneb execution payload types.
                 try toExecutionPayloadHeader(
                     allocator,
@@ -100,6 +104,7 @@ pub const ExecutionPayload = union(enum) {
                 out.electra.excess_blob_gas = payload.excess_blob_gas;
             },
             .fulu => |payload| {
+                out.* = .{ .fulu = undefined };
                 // Fulu reuses Electra (which reuses Deneb) execution payload types.
                 try toExecutionPayloadHeader(
                     allocator,
@@ -436,17 +441,15 @@ test "electra - sanity" {
         .blob_gas_used = 0,
         .excess_blob_gas = 0,
     };
-    const electra_payload: ExecutionPayload = .{ .electra = &payload };
-    var header_out = ct.electra.ExecutionPayloadHeader.default_value;
-    var header: ExecutionPayloadHeader = .{ .electra = &header_out };
+    const electra_payload: ExecutionPayload = .{ .electra = payload };
+    const header_out = ct.electra.ExecutionPayloadHeader.default_value;
+    var header: ExecutionPayloadHeader = .{ .electra = header_out };
     try electra_payload.createPayloadHeader(std.testing.allocator, &header);
-    defer std.testing.allocator.destroy(header.electra);
     defer header.deinit(std.testing.allocator);
     _ = header.getGasUsed();
     try std.testing.expect(header.electra.block_number == payload.block_number);
 
     var owned_header = try electra_payload.toPayloadHeader(std.testing.allocator);
-    defer owned_header.destroy(std.testing.allocator);
     defer owned_header.deinit(std.testing.allocator);
     try std.testing.expect(owned_header.electra.block_number == payload.block_number);
 }
