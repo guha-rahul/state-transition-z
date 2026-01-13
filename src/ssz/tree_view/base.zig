@@ -73,10 +73,16 @@ pub const TreeViewData = struct {
         const nodes = try allocator.alloc(Node.Id, self.changed.count());
         defer allocator.free(nodes);
 
-        const gindices = self.changed.keys();
-        Gindex.sortAsc(gindices);
+        const SortCtx = struct {
+            keys: []Gindex,
+            pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+                return @intFromEnum(ctx.keys[a_index]) < @intFromEnum(ctx.keys[b_index]);
+            }
+        };
+        self.changed.sortUnstable(SortCtx{ .keys = self.changed.keys() });
+        const gindices_sorted = self.changed.keys();
 
-        for (gindices, 0..) |gindex, i| {
+        for (gindices_sorted, 0..) |gindex, i| {
             if (self.children_data.get(gindex)) |child_data| {
                 try child_data.commit(allocator, pool);
                 nodes[i] = child_data.root;
@@ -87,7 +93,7 @@ pub const TreeViewData = struct {
             }
         }
 
-        const new_root = try self.root.setNodesGrouped(pool, gindices, nodes);
+        const new_root = try self.root.setNodesGrouped(pool, gindices_sorted, nodes);
         try pool.ref(new_root);
         pool.unref(self.root);
         self.root = new_root;
@@ -229,6 +235,8 @@ pub const BaseTreeView = struct {
     pub fn getChildData(self: *BaseTreeView, gindex: Gindex) !*TreeViewData {
         const gop = try self.data.children_data.getOrPut(self.allocator, gindex);
         if (gop.found_existing) {
+            // TODO only update changed if the subview is mutable
+            try self.data.changed.put(self.allocator, gindex, {});
             return gop.value_ptr.*;
         }
         const child_node = try self.getChildNode(gindex);
@@ -242,21 +250,6 @@ pub const BaseTreeView = struct {
 
     pub fn setChildData(self: *BaseTreeView, gindex: Gindex, child_data: *TreeViewData) !void {
         try self.data.changed.put(self.allocator, gindex, {});
-
-        // Keep `children_nodes` coherent with `children_data`.
-        // Complex fields are updated via `setChildData()` and may otherwise leave an older cached node id in
-        // `children_nodes`, causing subsequent reads (e.g. getRoot/getChildNode) to observe stale data.
-        const opt_old_node = try self.data.children_nodes.fetchPut(
-            self.allocator,
-            gindex,
-            child_data.root,
-        );
-        if (opt_old_node) |old_node| {
-            if (old_node.value != child_data.root and old_node.value.getState(self.pool).getRefCount() == 0) {
-                self.pool.unref(old_node.value);
-            }
-        }
-
         const opt_old_data = try self.data.children_data.fetchPut(
             self.allocator,
             gindex,

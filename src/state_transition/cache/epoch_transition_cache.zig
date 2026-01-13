@@ -356,10 +356,20 @@ pub const EpochTransitionCache = struct {
 
             var previous_epoch_pending_attestations_view = try state.previousEpochPendingAttestations();
             const previous_epoch_pending_attestations = try previous_epoch_pending_attestations_view.getAllReadonlyValues(allocator);
-            defer allocator.free(previous_epoch_pending_attestations);
+            defer {
+                for (previous_epoch_pending_attestations) |*att| {
+                    types.phase0.PendingAttestation.deinit(allocator, att);
+                }
+                allocator.free(previous_epoch_pending_attestations);
+            }
             var current_epoch_pending_attestations_view = try state.currentEpochPendingAttestations();
             const current_epoch_pending_attestations = try current_epoch_pending_attestations_view.getAllReadonlyValues(allocator);
-            defer allocator.free(current_epoch_pending_attestations);
+            defer {
+                for (current_epoch_pending_attestations) |*att| {
+                    types.phase0.PendingAttestation.deinit(allocator, att);
+                }
+                allocator.free(current_epoch_pending_attestations);
+            }
 
             try processPendingAttestations(
                 allocator,
