@@ -195,6 +195,14 @@ pub fn stateTransition(
             .blinded => |b| b.stateRoot(),
         };
         if (!std.mem.eql(u8, post_state_root, &block_state_root)) {
+            std.debug.print(
+                "InvalidStateRoot at slot {}:\n  computed_post_state_root={s}\n  block_state_root={s}\n",
+                .{
+                    block_slot,
+                    std.fmt.fmtSliceHexLower(post_state_root[0..]),
+                    std.fmt.fmtSliceHexLower(block_state_root[0..]),
+                },
+            );
             return error.InvalidStateRoot;
         }
     }

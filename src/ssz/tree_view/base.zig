@@ -242,6 +242,21 @@ pub const BaseTreeView = struct {
 
     pub fn setChildData(self: *BaseTreeView, gindex: Gindex, child_data: *TreeViewData) !void {
         try self.data.changed.put(self.allocator, gindex, {});
+
+        // Keep `children_nodes` coherent with `children_data`.
+        // Complex fields are updated via `setChildData()` and may otherwise leave an older cached node id in
+        // `children_nodes`, causing subsequent reads (e.g. getRoot/getChildNode) to observe stale data.
+        const opt_old_node = try self.data.children_nodes.fetchPut(
+            self.allocator,
+            gindex,
+            child_data.root,
+        );
+        if (opt_old_node) |old_node| {
+            if (old_node.value != child_data.root and old_node.value.getState(self.pool).getRefCount() == 0) {
+                self.pool.unref(old_node.value);
+            }
+        }
+
         const opt_old_data = try self.data.children_data.fetchPut(
             self.allocator,
             gindex,
