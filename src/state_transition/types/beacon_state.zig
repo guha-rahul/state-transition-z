@@ -66,51 +66,55 @@ pub const BeaconState = union(ForkSeq) {
             .electra => .{
                 .electra = try ct.electra.BeaconState.TreeView.deserialize(allocator, pool, bytes),
             },
+            .fulu => .{
+                .fulu = try ct.fulu.BeaconState.TreeView.deserialize(allocator, pool, bytes),
+            },
         };
     }
 
     pub fn serialize(self: BeaconState, allocator: Allocator) ![]u8 {
-        switch (self) {
-            .phase0 => |state| {
+        var s = self;
+        switch (s) {
+            .phase0 => |*state| {
                 const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .altair => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .altair => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .bellatrix => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .bellatrix => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .capella => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .capella => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .deneb => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .deneb => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .electra => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .electra => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
-            .fulu => |state| {
-                const out = try allocator.alloc(u8, state.serializedSize());
+            .fulu => |*state| {
+                const out = try allocator.alloc(u8, try state.serializedSize());
                 errdefer allocator.free(out);
-                _ = state.serializeIntoBytes(out);
+                _ = try state.serializeIntoBytes(out);
                 return out;
             },
         }
@@ -161,7 +165,7 @@ pub const BeaconState = union(ForkSeq) {
         }
     }
 
-    pub fn forkSeq(self: *const BeaconState) ForkSeq {
+    pub fn forkSeq(self: *BeaconState) ForkSeq {
         return (self.*);
     }
 
@@ -875,8 +879,7 @@ test "electra - sanity" {
     try beacon_state.setSlot(12345);
 
     try std.testing.expect((try beacon_state.genesisTime()) == 0);
-    const genesis_validators_root = try beacon_state.genesisValidatorsRoot();
-    try std.testing.expectEqualSlices(u8, &[_]u8{0} ** 32, genesis_validators_root[0..]);
+    try std.testing.expectEqualSlices(u8, &[_]u8{0} ** 32, (try beacon_state.genesisValidatorsRoot())[0..]);
     try std.testing.expect((try beacon_state.slot()) == 12345);
     try beacon_state.setSlot(2025);
     try std.testing.expect((try beacon_state.slot()) == 2025);

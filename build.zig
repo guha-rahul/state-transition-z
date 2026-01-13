@@ -870,6 +870,7 @@ pub fn build(b: *std.Build) void {
     module_era.addImport("preset", module_preset);
     module_era.addImport("state_transition", module_state_transition);
     module_era.addImport("snappy", dep_snappy.module("snappy"));
+    module_era.addImport("persistent_merkle_tree", module_persistent_merkle_tree);
 
     module_hashing.addImport("build_options", options_module_build_options);
     module_hashing.addImport("hex", module_hex);

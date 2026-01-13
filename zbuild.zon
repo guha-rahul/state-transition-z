@@ -81,7 +81,7 @@
         },
         .era = .{
             .root_source_file = "src/era/root.zig",
-            .imports = .{ .consensus_types, .config, .preset, .state_transition, .snappy },
+            .imports = .{ .consensus_types, .config, .preset, .state_transition, .snappy, .persistent_merkle_tree },
         },
         .hashing = .{
             .root_source_file = "src/hashing/root.zig",
