@@ -234,6 +234,14 @@ pub const BaseTreeView = struct {
 
     pub fn setChildNode(self: *BaseTreeView, gindex: Gindex, node: Node.Id) !void {
         try self.data.changed.put(self.allocator, gindex, {});
+
+        // If a cached subview exists for this child, it would otherwise take precedence over
+        // `children_nodes` in `getChildNode()` and effectively ignore this update.
+        // Setting a child node replaces the subtree root, so any existing subview cache must be dropped.
+        if (self.data.children_data.fetchRemove(gindex)) |old_data| {
+            old_data.value.deinit(self.allocator, self.pool);
+        }
+
         const opt_old_node = try self.data.children_nodes.fetchPut(
             self.allocator,
             gindex,
@@ -266,6 +274,15 @@ pub const BaseTreeView = struct {
 
     pub fn setChildData(self: *BaseTreeView, gindex: Gindex, child_data: *TreeViewData) !void {
         try self.data.changed.put(self.allocator, gindex, {});
+
+        // Child data (a subview) takes precedence over `children_nodes` in `getChildNode()`,
+        // so drop any cached node entry to avoid stale cache and potential leaks of temp nodes.
+        if (self.data.children_nodes.fetchRemove(gindex)) |old_node| {
+            if (old_node.value.getState(self.pool).getRefCount() == 0) {
+                self.pool.unref(old_node.value);
+            }
+        }
+
         const opt_old_data = try self.data.children_data.fetchPut(
             self.allocator,
             gindex,

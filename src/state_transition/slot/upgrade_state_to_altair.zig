@@ -75,7 +75,12 @@ fn translateParticipation(allocator: Allocator, cached_state: *CachedBeaconState
     defer root_cache.deinit();
 
     const pending_attestations = try @constCast(&pending_attestations_tree).getAllReadonlyValues(allocator);
-    defer allocator.free(pending_attestations);
+    defer {
+        for (pending_attestations) |*attestation| {
+            types.phase0.PendingAttestation.deinit(allocator, attestation);
+        }
+        allocator.free(pending_attestations);
+    }
 
     // translate all participations into a flat array, then convert to tree view the end
     var epoch_participation = types.altair.EpochParticipation.default_value;

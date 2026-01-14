@@ -112,8 +112,8 @@ pub fn Transition(comptime fork: ForkSeq) type {
             }
             self.pre.allocator.free(self.blocks);
             self.pre.deinit();
-            if (self.post) |*post| {
-                post.deinit(self.pre.allocator);
+            if (self.post) |post| {
+                post.deinit();
                 self.pre.allocator.destroy(post);
             }
         }

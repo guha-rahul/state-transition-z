@@ -390,16 +390,8 @@ pub const BeaconState = union(ForkSeq) {
     pub fn rotateEpochPendingAttestations(self: *BeaconState) !void {
         return switch (self.*) {
             .phase0 => |*state| {
-                var current_epoch_attestations = try state.get("current_epoch_attestations");
-                // TODO: Align with lodestar-ts rotate semantics (move root / avoid extra work).
-                // `current_epoch_attestations` is a borrowed subview into `state`'s caches.
-                // Do not pass it to `set()`, which transfers ownership and may later deinit the same TreeViewData.
-                // Clone to get an independent owned view.
-                var cloned: ?ct.phase0.EpochAttestations.TreeView = try current_epoch_attestations.clone(.{ .transfer_cache = false });
-                errdefer if (cloned) |*v| v.deinit();
-
-                try state.set("previous_epoch_attestations", cloned.?);
-                cloned = null;
+                const current_root = try state.getRootNode("current_epoch_attestations");
+                try state.setRootNode("previous_epoch_attestations", current_root);
                 try state.setValue("current_epoch_attestations", &ct.phase0.EpochAttestations.default_value);
             },
             else => error.InvalidAtFork,
@@ -438,9 +430,16 @@ pub const BeaconState = union(ForkSeq) {
         return switch (self.*) {
             .phase0 => error.InvalidAtFork,
             inline else => |*state| {
+                const current_root = try state.getRootNode("current_epoch_participation");
+                try state.setRootNode("previous_epoch_participation", current_root);
+
+                // Reset current_epoch_participation to zeroed list preserving length.
+                // Equivalent to Lodestar TS `tree_setChunksNode(..., zeroNode(chunkDepth), length)`.
                 var current_epoch_participation = try state.get("current_epoch_participation");
-                try state.set("previous_epoch_participation", try current_epoch_participation.clone(.{}));
-                try state.setValue("current_epoch_participation", &ct.altair.EpochParticipation.default_value);
+                try current_epoch_participation.base_view.setChildNode(
+                    @enumFromInt(2),
+                    @enumFromInt(ct.altair.EpochParticipation.chunk_depth),
+                );
             },
         };
     }
