@@ -207,7 +207,9 @@ pub const BeaconState = union(ForkSeq) {
     }
 
     pub fn forkCurrentVersion(self: *BeaconState) ![4]u8 {
-        var f = try self.fork();
+        var f = switch (self.*) {
+            inline else => |*state| try state.getReadonly("fork"),
+        };
         const current_version_root = try f.getRoot("current_version");
         var version: [4]u8 = undefined;
         @memcpy(&version, current_version_root[0..4]);
@@ -322,7 +324,7 @@ pub const BeaconState = union(ForkSeq) {
     pub fn validatorsCount(self: *BeaconState) !usize {
         return switch (self.*) {
             inline else => |*state| {
-                var validators_view = try state.get("validators");
+                var validators_view = try state.getReadonly("validators");
                 return validators_view.length();
             },
         };
@@ -333,7 +335,7 @@ pub const BeaconState = union(ForkSeq) {
     pub fn validatorsSlice(self: *BeaconState, allocator: Allocator) ![]ct.phase0.Validator.Type {
         return switch (self.*) {
             inline else => |*state| {
-                var validators_view = try state.get("validators");
+                var validators_view = try state.getReadonly("validators");
                 return validators_view.getAllReadonlyValues(allocator);
             },
         };
@@ -353,18 +355,7 @@ pub const BeaconState = union(ForkSeq) {
 
     pub fn setRandaoMix(self: *BeaconState, epoch: u64, randao_mix: *const ct.primitive.Bytes32.Type) !void {
         var mixes = try self.randaoMixes();
-        const MixesView = @TypeOf(mixes);
-        const ElemST = MixesView.SszType.Element;
-
-        const child_root = try ElemST.tree.fromValue(mixes.base_view.pool, randao_mix);
-        errdefer mixes.base_view.pool.unref(child_root);
-        const child_view = try ElemST.TreeView.init(
-            mixes.base_view.allocator,
-            mixes.base_view.pool,
-            child_root,
-        );
-
-        try mixes.set(epoch % preset.EPOCHS_PER_HISTORICAL_VECTOR, child_view);
+        try mixes.setValue(epoch % preset.EPOCHS_PER_HISTORICAL_VECTOR, randao_mix);
     }
 
     pub fn slashings(self: *BeaconState) !ct.phase0.Slashings.TreeView {

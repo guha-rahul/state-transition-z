@@ -73,7 +73,7 @@ pub fn ContainerTreeView(comptime ST: type) type {
             if (comptime isBasicType(ChildST)) {
                 return try self.base_view.getChildNode(field_gindex);
             } else {
-                const field_data = try self.base_view.getChildData(field_gindex);
+                const field_data = try self.base_view.getChildDataReadonly(field_gindex);
                 try field_data.commit(self.base_view.allocator, self.base_view.pool);
                 return field_data.root;
             }
@@ -130,13 +130,40 @@ pub fn ContainerTreeView(comptime ST: type) type {
         pub fn getValue(self: *Self, allocator: Allocator, comptime field_name: []const u8) !FieldValue(field_name) {
             const ChildST = ST.getFieldType(field_name);
             if (comptime isBasicType(ChildST)) {
-                return self.get(field_name);
+                return self.getReadonly(field_name);
             }
 
-            var child_view = try self.get(field_name);
+            var child_view = try self.getReadonly(field_name);
             var out = ChildST.default_value;
             try child_view.toValue(allocator, &out);
             return out;
+        }
+
+        /// Get a field by name. If the field is a basic type, returns the value directly.
+        /// Caller borrows a copy of the value so there is no need to deinit it.
+        pub fn getReadonly(self: *Self, comptime field_name: []const u8) !Field(field_name) {
+            comptime {
+                @setEvalBranchQuota(20000);
+            }
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const ChildST = ST.getFieldType(field_name);
+            const child_gindex = Gindex.fromDepth(ST.chunk_depth, field_index);
+            if (comptime isBasicType(ChildST)) {
+                var value: ChildST.Type = undefined;
+                const child_node = try self.base_view.getChildNode(child_gindex);
+                try ChildST.tree.toValue(child_node, self.base_view.pool, &value);
+                return value;
+            } else {
+                const child_data = try self.base_view.getChildDataReadonly(child_gindex);
+
+                return .{
+                    .base_view = .{
+                        .allocator = self.base_view.allocator,
+                        .pool = self.base_view.pool,
+                        .data = child_data,
+                    },
+                };
+            }
         }
 
         /// Set a field by name. If the field is a basic type, pass the value directly.

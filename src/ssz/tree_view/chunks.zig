@@ -58,9 +58,9 @@ pub fn BasicPackedChunks(
             if (len == 0) return values;
 
             // TODO revisit this restriction later
-            // if (base_view.data.changed.count() != 0) {
-            //     return error.MustCommitBeforeBulkRead;
-            // }
+            if (base_view.data.changed.count() != 0) {
+                return error.MustCommitBeforeBulkRead;
+            }
 
             const len_full_chunks = len / items_per_chunk;
             const remainder = len % items_per_chunk;
@@ -134,9 +134,38 @@ pub fn CompositeChunks(
             };
         }
 
+        pub fn getReadonly(base_view: *BaseTreeView, index: usize) !Element {
+            const child_data = try base_view.getChildDataReadonly(Gindex.fromDepth(chunk_depth, index));
+            return .{
+                .base_view = .{
+                    .allocator = base_view.allocator,
+                    .pool = base_view.pool,
+                    .data = child_data,
+                },
+            };
+        }
+
+        pub fn getValue(base_view: *BaseTreeView, allocator: Allocator, index: usize) !ST.Element.Type {
+            var child_view = try getReadonly(base_view, index);
+            var out = ST.Element.default_value;
+            try child_view.toValue(allocator, &out);
+            return out;
+        }
+
         pub fn set(base_view: *BaseTreeView, index: usize, value: Element) !void {
             const gindex = Gindex.fromDepth(chunk_depth, index);
             try base_view.setChildData(gindex, value.base_view.data);
+        }
+
+        pub fn setValue(base_view: *BaseTreeView, index: usize, value: *const ST.Element.Type) !void {
+            const root = try ST.Element.tree.fromValue(base_view.pool, value);
+            errdefer base_view.pool.unref(root);
+            const child_view = try ST.Element.TreeView.init(
+                base_view.allocator,
+                base_view.pool,
+                root,
+            );
+            try set(base_view, index, child_view);
         }
 
         /// Get all element values in a single traversal.

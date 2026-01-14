@@ -80,10 +80,13 @@ pub fn ArrayCompositeTreeView(comptime ST: type) type {
         }
 
         pub fn getReadonly(self: *Self, index: usize) !Element {
-            // TODO: Implement read-only access after other PRs land.
-            _ = self;
-            _ = index;
-            return error.NotImplemented;
+            if (index >= length) return error.IndexOutOfBounds;
+            return try Chunks.getReadonly(&self.base_view, index);
+        }
+
+        pub fn getValue(self: *Self, allocator: Allocator, index: usize) !ST.Element.Type {
+            if (index >= length) return error.IndexOutOfBounds;
+            return try Chunks.getValue(&self.base_view, allocator, index);
         }
 
         pub fn set(self: *Self, index: usize, value: Element) !void {
@@ -92,14 +95,8 @@ pub fn ArrayCompositeTreeView(comptime ST: type) type {
         }
 
         pub fn setValue(self: *Self, index: usize, value: *const ST.Element.Type) !void {
-            const root = try ST.Element.tree.fromValue(self.base_view.pool, value);
-            errdefer self.base_view.pool.unref(root);
-            const child_view = try ST.Element.TreeView.init(
-                self.base_view.allocator,
-                self.base_view.pool,
-                root,
-            );
-            try self.set(index, child_view);
+            if (index >= length) return error.IndexOutOfBounds;
+            try Chunks.setValue(&self.base_view, index, value);
         }
 
         pub fn getAllReadonly(self: *Self, allocator: Allocator) ![]Element {

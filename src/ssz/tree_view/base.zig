@@ -239,18 +239,20 @@ pub const BaseTreeView = struct {
     }
 
     pub fn getChildData(self: *BaseTreeView, gindex: Gindex) !*TreeViewData {
+        const child_data = try self.getChildDataReadonly(gindex);
+        try self.data.changed.put(self.allocator, gindex, {});
+        return child_data;
+    }
+
+    pub fn getChildDataReadonly(self: *BaseTreeView, gindex: Gindex) !*TreeViewData {
         const gop = try self.data.children_data.getOrPut(self.allocator, gindex);
         if (gop.found_existing) {
-            // TODO only update changed if the subview is mutable
-            try self.data.changed.put(self.allocator, gindex, {});
             return gop.value_ptr.*;
         }
         const child_node = try self.data.root.getNode(self.pool, gindex);
         const child_data = try TreeViewData.init(self.allocator, self.pool, child_node);
         gop.value_ptr.* = child_data;
 
-        // TODO only update changed if the subview is mutable
-        try self.data.changed.put(self.allocator, gindex, {});
         return child_data;
     }
 

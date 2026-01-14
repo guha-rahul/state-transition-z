@@ -281,7 +281,7 @@ pub fn expectEqualBeaconStates(expected: *BeaconState, actual: *BeaconState) !vo
                             var expected_field_view = try expected_view.get(field.name);
                             if (comptime @hasDecl(FieldST, "TreeView") and @hasDecl(FieldST.TreeView, "length") and @typeInfo(@TypeOf(FieldST.TreeView.length)) == .@"fn") {
                                 std.debug.print(
-                                    "  expected_value_length:   {any}\n",
+                                    "  expected_value_length: {any}\n",
                                     .{try expected_field_view.length()},
                                 );
                             }

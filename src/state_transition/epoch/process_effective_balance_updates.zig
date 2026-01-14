@@ -30,6 +30,7 @@ pub fn processEffectiveBalanceUpdates(allocator: Allocator, cached_state: *Cache
     // so it's recycled here for performance.
     const balances = if (cache.balances) |balances_arr| balances_arr.items else blk: {
         var balances_view = try state.balances();
+        try balances_view.commit();
         break :blk try balances_view.getAll(allocator);
     };
     defer if (cache.balances == null) {

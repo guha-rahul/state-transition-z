@@ -88,18 +88,16 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
             return try Chunks.get(&self.base_view, index);
         }
 
-        pub fn getValue(self: *Self, allocator: Allocator, index: usize) !ST.Element.Type {
-            var child_view = try self.get(index);
-            var out = ST.Element.default_value;
-            try child_view.toValue(allocator, &out);
-            return out;
+        pub fn getReadonly(self: *Self, index: usize) !Element {
+            const list_length = try self.length();
+            if (index >= list_length) return error.IndexOutOfBounds;
+            return try Chunks.getReadonly(&self.base_view, index);
         }
 
-        pub fn getReadonly(self: *Self, index: usize) !Element {
-            // TODO: Implement read-only access after other PRs land.
-            _ = self;
-            _ = index;
-            return error.NotImplemented;
+        pub fn getValue(self: *Self, allocator: Allocator, index: usize) !ST.Element.Type {
+            const list_length = try self.length();
+            if (index >= list_length) return error.IndexOutOfBounds;
+            return try Chunks.getValue(&self.base_view, allocator, index);
         }
 
         pub fn set(self: *Self, index: usize, value: Element) !void {
@@ -109,14 +107,9 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
         }
 
         pub fn setValue(self: *Self, index: usize, value: *const ST.Element.Type) !void {
-            const root = try ST.Element.tree.fromValue(self.base_view.pool, value);
-            errdefer self.base_view.pool.unref(root);
-            const child_view = try ST.Element.TreeView.init(
-                self.base_view.allocator,
-                self.base_view.pool,
-                root,
-            );
-            try self.set(index, child_view);
+            const list_length = try self.length();
+            if (index >= list_length) return error.IndexOutOfBounds;
+            try Chunks.setValue(&self.base_view, index, value);
         }
 
         pub fn getAllReadonly(self: *Self, allocator: Allocator) ![]Element {
@@ -144,12 +137,10 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
         /// as it is now owned by the list.
         pub fn push(self: *Self, value: Element) !void {
             const list_length = try self.length();
-            if (list_length >= ST.limit) {
-                return error.LengthOverLimit;
-            }
+            if (list_length >= ST.limit) return error.LengthOverLimit;
 
             try self.updateListLength(list_length + 1);
-            try self.set(list_length, value);
+            try Chunks.set(&self.base_view, list_length, value);
         }
 
         pub fn pushValue(self: *Self, value: *const ST.Element.Type) !void {
