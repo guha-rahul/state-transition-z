@@ -9,8 +9,8 @@ const state_transition = @import("state_transition");
 const types = @import("consensus_types");
 const config = @import("config");
 const ForkSeq = config.ForkSeq;
-const CachedBeaconStateAllForks = state_transition.CachedBeaconStateAllForks;
-const BeaconStateAllForks = state_transition.BeaconStateAllForks;
+const CachedBeaconState = state_transition.CachedBeaconState;
+const BeaconState = state_transition.BeaconState;
 const EpochTransitionCache = state_transition.EpochTransitionCache;
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 const PubkeyIndexMap = state_transition.PubkeyIndexMap(ValidatorIndex);
@@ -18,7 +18,7 @@ const slotFromStateBytes = @import("utils.zig").slotFromStateBytes;
 const loadState = @import("utils.zig").loadState;
 
 const ProcessJustificationAndFinalizationBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessJustificationAndFinalizationBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -36,7 +36,7 @@ const ProcessJustificationAndFinalizationBench = struct {
 };
 
 const ProcessInactivityUpdatesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessInactivityUpdatesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -54,7 +54,7 @@ const ProcessInactivityUpdatesBench = struct {
 };
 
 const ProcessRewardsAndPenaltiesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessRewardsAndPenaltiesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -72,7 +72,7 @@ const ProcessRewardsAndPenaltiesBench = struct {
 };
 
 const ProcessRegistryUpdatesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessRegistryUpdatesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -90,7 +90,7 @@ const ProcessRegistryUpdatesBench = struct {
 };
 
 const ProcessSlashingsBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessSlashingsBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -108,7 +108,7 @@ const ProcessSlashingsBench = struct {
 };
 
 const ProcessEth1DataResetBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessEth1DataResetBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -126,7 +126,7 @@ const ProcessEth1DataResetBench = struct {
 };
 
 const ProcessPendingDepositsBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessPendingDepositsBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -144,7 +144,7 @@ const ProcessPendingDepositsBench = struct {
 };
 
 const ProcessPendingConsolidationsBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessPendingConsolidationsBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -162,7 +162,7 @@ const ProcessPendingConsolidationsBench = struct {
 };
 
 const ProcessEffectiveBalanceUpdatesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessEffectiveBalanceUpdatesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -180,7 +180,7 @@ const ProcessEffectiveBalanceUpdatesBench = struct {
 };
 
 const ProcessSlashingsResetBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessSlashingsResetBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -198,7 +198,7 @@ const ProcessSlashingsResetBench = struct {
 };
 
 const ProcessRandaoMixesResetBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessRandaoMixesResetBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -216,7 +216,7 @@ const ProcessRandaoMixesResetBench = struct {
 };
 
 const ProcessHistoricalSummariesUpdateBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessHistoricalSummariesUpdateBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -234,7 +234,7 @@ const ProcessHistoricalSummariesUpdateBench = struct {
 };
 
 const ProcessParticipationFlagUpdatesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessParticipationFlagUpdatesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -247,7 +247,7 @@ const ProcessParticipationFlagUpdatesBench = struct {
 };
 
 const ProcessSyncCommitteeUpdatesBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessSyncCommitteeUpdatesBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -260,7 +260,7 @@ const ProcessSyncCommitteeUpdatesBench = struct {
 };
 
 const ProcessProposerLookaheadBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessProposerLookaheadBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -337,7 +337,7 @@ fn printSegmentStats(stdout: anytype) !void {
 }
 
 const ProcessEpochBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessEpochBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -357,7 +357,7 @@ const ProcessEpochBench = struct {
 };
 
 const ProcessEpochSegmentedBench = struct {
-    cached_state: *CachedBeaconStateAllForks,
+    cached_state: *CachedBeaconState,
 
     pub fn run(self: ProcessEpochSegmentedBench, allocator: std.mem.Allocator) void {
         const cloned = self.cached_state.clone(allocator) catch unreachable;
@@ -521,7 +521,7 @@ fn runBenchmark(
         .pubkey_to_index = pubkey_index_map,
     };
 
-    const cached_state = try CachedBeaconStateAllForks.createCachedBeaconState(allocator, beacon_state, immutable_data, .{
+    const cached_state = try CachedBeaconState.createCachedBeaconState(allocator, beacon_state, immutable_data, .{
         .skip_sync_committee_cache = !comptime fork.gte(.altair),
         .skip_sync_pubkeys = false,
     });

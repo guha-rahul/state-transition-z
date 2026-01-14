@@ -383,6 +383,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("bench/state_transition/process_block.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = false,
+        .omit_frame_pointer = false,
     });
     b.modules.put(b.dupe("bench_process_block"), module_bench_process_block) catch @panic("OOM");
 
@@ -938,6 +940,9 @@ pub fn build(b: *std.Build) void {
     module_bench_process_block.addImport("consensus_types", module_consensus_types);
     module_bench_process_block.addImport("config", module_config);
     module_bench_process_block.addImport("zbench", dep_zbench.module("zbench"));
+    module_bench_process_block.addImport("persistent_merkle_tree", module_persistent_merkle_tree);
+    module_bench_process_block.addImport("download_era_options", options_module_download_era_options);
+    module_bench_process_block.addImport("era", module_era);
 
     module_bench_process_epoch.addImport("state_transition", module_state_transition);
     module_bench_process_epoch.addImport("consensus_types", module_consensus_types);
