@@ -170,7 +170,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                     try state_transition.processDeposit(allocator, self.pre.cached_state, &self.op);
                 },
                 .deposit_request => {
-                    try state_transition.processDepositRequest(allocator, self.pre.cached_state, &self.op);
+                    try state_transition.processDepositRequest(self.pre.cached_state, &self.op);
                 },
                 .execution_payload => {
                     try state_transition.processExecutionPayload(
@@ -190,7 +190,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                     try state_transition.processVoluntaryExit(self.pre.cached_state, &self.op, verify);
                 },
                 .withdrawal_request => {
-                    try state_transition.processWithdrawalRequest(allocator, self.pre.cached_state, &self.op);
+                    try state_transition.processWithdrawalRequest(self.pre.cached_state, &self.op);
                 },
                 .withdrawals => {
                     var withdrawals_result = WithdrawalsResult{

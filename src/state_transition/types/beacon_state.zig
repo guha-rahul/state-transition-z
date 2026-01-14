@@ -430,16 +430,19 @@ pub const BeaconState = union(ForkSeq) {
         return switch (self.*) {
             .phase0 => error.InvalidAtFork,
             inline else => |*state| {
-                const current_root = try state.getRootNode("current_epoch_participation");
-                try state.setRootNode("previous_epoch_participation", current_root);
+                var current_epoch_participation = try state.get("current_epoch_participation");
+                try current_epoch_participation.commit();
+                const length = try current_epoch_participation.length();
+                try state.set("previous_epoch_participation", try current_epoch_participation.clone(.{}));
 
-                // Reset current_epoch_participation by replacing the subtree root (TS Lodestar semantics):
-                // `state.currentEpochParticipation = getViewDU(tree_setChunksNode(oldNode, zeroNode(chunkDepth), length))`
-                //
-                // SSZ List root is a branch node: left = chunks subtree, right = length leaf.
-                // Keep the existing length leaf by updating only the left child (gindex=2) to a zero-node at chunk depth.
-                const zero_chunks: Node.Id = @enumFromInt(ct.altair.EpochParticipation.chunk_depth);
-                const new_current_root = try current_root.setNode(state.base_view.pool, @enumFromInt(2), zero_chunks);
+                // Reset current_epoch_participation by rebuilding a zeroed SSZ List of the same length.
+                // SSZ List root is a branch node:
+                // - left = chunks subtree
+                // - right = length leaf
+                const new_current_root = try state.base_view.pool.createBranch(
+                    @enumFromInt(ct.altair.EpochParticipation.chunk_depth),
+                    try state.base_view.pool.createLeafFromUint(length),
+                );
                 try state.setRootNode("current_epoch_participation", new_current_root);
             },
         };

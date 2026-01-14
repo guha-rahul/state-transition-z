@@ -273,6 +273,44 @@ pub fn expectEqualBeaconStates(expected: *BeaconState, actual: *BeaconState) !vo
                                 std.fmt.fmtSliceHexLower(actual_field_root),
                             },
                         );
+
+                        @setEvalBranchQuota(100000);
+                        const FieldST = StateST.getFieldType(field.name);
+                        const allocator = std.testing.allocator;
+                        {
+                            var expected_field_view = try expected_view.get(field.name);
+                            if (comptime @hasDecl(FieldST, "TreeView") and @hasDecl(FieldST.TreeView, "length") and @typeInfo(@TypeOf(FieldST.TreeView.length)) == .@"fn") {
+                                std.debug.print(
+                                    "  expected_value_length:   {any}\n",
+                                    .{try expected_field_view.length()},
+                                );
+                            }
+                            var expected_field_value = try expected_view.getValue(allocator, field.name);
+                            defer if (@hasDecl(FieldST, "deinit"))
+                                FieldST.deinit(allocator, &expected_field_value);
+
+                            std.debug.print(
+                                "  expected_value: {any}\n",
+                                .{expected_field_value},
+                            );
+                        }
+                        {
+                            var actual_field_view = try actual_view.get(field.name);
+                            if (comptime @hasDecl(FieldST, "TreeView") and @hasDecl(FieldST.TreeView, "length") and @typeInfo(@TypeOf(FieldST.TreeView.length)) == .@"fn") {
+                                std.debug.print(
+                                    "  actual_value_length:   {any}\n",
+                                    .{try actual_field_view.length()},
+                                );
+                            }
+                            var actual_field_value = try actual_view.getValue(allocator, field.name);
+                            defer if (@hasDecl(FieldST, "deinit"))
+                                FieldST.deinit(allocator, &actual_field_value);
+
+                            std.debug.print(
+                                "  actual_value:   {any}\n",
+                                .{actual_field_value},
+                            );
+                        }
                     }
                 }
             }

@@ -11,13 +11,17 @@ const hasCompoundingWithdrawalCredential = @import("../utils/electra.zig").hasCo
 const queueExcessActiveBalance = @import("../utils/electra.zig").queueExcessActiveBalance;
 
 pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconState) !void {
-    var deneb_state = cached_state.state;
+    var deneb_state = cached_state.state.*;
     if (deneb_state.forkSeq() != .deneb) {
         return error.StateIsNotDeneb;
     }
 
     var state = try deneb_state.upgradeUnsafe();
-    errdefer state.deinit();
+    cached_state.state.* = state;
+    errdefer {
+        state.deinit();
+        cached_state.state.* = deneb_state;
+    }
 
     const new_fork: ct.phase0.Fork.Type = .{
         .previous_version = try deneb_state.forkCurrentVersion(),
@@ -96,5 +100,4 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
     }
 
     deneb_state.deinit();
-    cached_state.state.* = state;
 }
