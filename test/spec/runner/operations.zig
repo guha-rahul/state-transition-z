@@ -5,6 +5,7 @@ const Root = ssz.primitive.Root.Type;
 const ForkSeq = @import("config").ForkSeq;
 const Preset = @import("preset").Preset;
 const preset = @import("preset").preset;
+const active_preset = @import("preset").active_preset;
 const state_transition = @import("state_transition");
 const TestCachedBeaconState = state_transition.test_utils.TestCachedBeaconState;
 const BeaconState = state_transition.BeaconState;
@@ -83,8 +84,15 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
         const Self = @This();
 
         pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
-            defer tc.deinit();
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(allocator, pool_size);
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
+            defer {
+                tc.deinit();
+                state_transition.deinitStateTransition();
+            }
 
             try tc.runTest();
         }

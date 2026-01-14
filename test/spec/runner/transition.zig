@@ -13,6 +13,7 @@ const loadSszValue = test_case.loadSszSnappyValue;
 const expectEqualBeaconStates = test_case.expectEqualBeaconStates;
 const TestCaseUtils = test_case.TestCaseUtils;
 const loadSignedBeaconBlock = test_case.loadSignedBeaconBlock;
+const active_preset = @import("preset").active_preset;
 
 pub fn Transition(comptime fork: ForkSeq) type {
     const tc_utils = TestCaseUtils(fork);
@@ -25,7 +26,11 @@ pub fn Transition(comptime fork: ForkSeq) type {
         const Self = @This();
 
         pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(allocator, pool_size);
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
             defer {
                 tc.deinit();
                 state_transition.deinitStateTransition();

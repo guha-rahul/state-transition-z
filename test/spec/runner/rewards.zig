@@ -12,6 +12,7 @@ const EpochTransitionCache = state_transition.EpochTransitionCache;
 const getRewardsAndPenaltiesFn = state_transition.getRewardsAndPenalties;
 
 const preset = @import("preset").preset;
+const active_preset = @import("preset").active_preset;
 
 pub const Handler = enum {
     basic,
@@ -38,7 +39,11 @@ pub fn TestCase(comptime fork: ForkSeq) type {
         const Self = @This();
 
         pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(allocator, pool_size);
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
             defer {
                 tc.deinit();
                 state_transition.deinitStateTransition();
