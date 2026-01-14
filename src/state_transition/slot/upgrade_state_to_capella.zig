@@ -49,6 +49,7 @@ pub fn upgradeStateToCapella(allocator: Allocator, cached_state: *CachedBeaconSt
     }
 
     var state = try bellatrix_state.upgradeUnsafe();
+    errdefer state.deinit();
 
     const new_fork: ct.phase0.Fork.Type = .{
         .previous_version = try bellatrix_state.forkCurrentVersion(),

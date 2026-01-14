@@ -256,25 +256,36 @@ pub fn expectEqualBeaconStates(expected: *BeaconState, actual: *BeaconState) !vo
         try expected.hashTreeRoot(),
         try actual.hashTreeRoot(),
     )) {
-        const allocator = std.testing.allocator;
-        var expected_view = types.phase0.BeaconState.TreeView{
-            .base_view = expected.baseView(),
-        };
-        var actual_view = types.phase0.BeaconState.TreeView{
-            .base_view = actual.baseView(),
+        const Debug = struct {
+            fn printDiff(comptime StateST: type, expected_state: *BeaconState, actual_state: *BeaconState) !void {
+                var expected_view = StateST.TreeView{ .base_view = expected_state.baseView() };
+                var actual_view = StateST.TreeView{ .base_view = actual_state.baseView() };
+
+                inline for (StateST.fields) |field| {
+                    const expected_field_root = try expected_view.getRoot(field.name);
+                    const actual_field_root = try actual_view.getRoot(field.name);
+                    if (!std.mem.eql(u8, expected_field_root, actual_field_root)) {
+                        std.debug.print(
+                            "field: {s}\n  expected_root: {s}\n  actual_root:   {s}\n",
+                            .{
+                                field.name,
+                                std.fmt.fmtSliceHexLower(expected_field_root),
+                                std.fmt.fmtSliceHexLower(actual_field_root),
+                            },
+                        );
+                    }
+                }
+            }
         };
 
-        inline for (types.phase0.BeaconState.fields) |field| {
-            // debug print field name and compare values if not equal
-            const expected_field_root = try expected_view.getRoot(field.name);
-            const actual_field_root = try actual_view.getRoot(field.name);
-            if (!std.mem.eql(u8, expected_field_root, actual_field_root)) {
-                std.debug.print("field: {s}\n", .{field.name});
-                const expected_field = try expected_view.getValue(allocator, field.name);
-                const actual_field = try actual_view.getValue(allocator, field.name);
-                std.debug.print("expected: {any}\n", .{expected_field});
-                std.debug.print("actual: {any}\n", .{actual_field});
-            }
+        switch (expected.forkSeq()) {
+            .phase0 => try Debug.printDiff(types.phase0.BeaconState, expected, actual),
+            .altair => try Debug.printDiff(types.altair.BeaconState, expected, actual),
+            .bellatrix => try Debug.printDiff(types.bellatrix.BeaconState, expected, actual),
+            .capella => try Debug.printDiff(types.capella.BeaconState, expected, actual),
+            .deneb => try Debug.printDiff(types.deneb.BeaconState, expected, actual),
+            .electra => try Debug.printDiff(types.electra.BeaconState, expected, actual),
+            .fulu => try Debug.printDiff(types.fulu.BeaconState, expected, actual),
         }
         return error.NotEqual;
     }

@@ -12,7 +12,7 @@ pub fn upgradeStateToDeneb(allocator: Allocator, cached_state: *CachedBeaconStat
     }
 
     var state = try capella_state.upgradeUnsafe();
-    defer capella_state.deinit();
+    errdefer state.deinit();
 
     const new_fork: ssz.phase0.Fork.Type = .{
         .previous_version = try capella_state.forkCurrentVersion(),

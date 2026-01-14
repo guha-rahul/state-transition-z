@@ -427,6 +427,13 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
+    pub fn setCurrentEpochParticipation(self: *BeaconState, participations: *const ct.altair.EpochParticipation.Type) !void {
+        return switch (self.*) {
+            .phase0 => error.InvalidAtFork,
+            inline else => |*state| try state.setValue("current_epoch_participation", participations),
+        };
+    }
+
     pub fn rotateEpochParticipation(self: *BeaconState) !void {
         return switch (self.*) {
             .phase0 => error.InvalidAtFork,

@@ -48,14 +48,23 @@ pub fn upgradeStateToAltair(allocator: Allocator, cached_state: *CachedBeaconSta
     try altair_state.setNextSyncCommittee(&sync_committee_info.sync_committee);
 
     try cached_state.epoch_cache_ref.get().setSyncCommitteesIndexed(&sync_committee_info.indices);
-    var epoch_participation = try translateParticipation(allocator, cached_state, try phase0_state.previousEpochPendingAttestations());
-    defer epoch_participation.deinit(allocator);
-    try altair_state.setPreviousEpochParticipation(&epoch_participation);
+
+    var previous_epoch_participation = try translateParticipation(allocator, cached_state, try phase0_state.previousEpochPendingAttestations());
+    defer previous_epoch_participation.deinit(allocator);
+    try altair_state.setPreviousEpochParticipation(&previous_epoch_participation);
+
+    var current_epoch_participation = try translateParticipation(allocator, cached_state, try phase0_state.currentEpochPendingAttestations());
+    defer current_epoch_participation.deinit(allocator);
+    try altair_state.setCurrentEpochParticipation(&current_epoch_participation);
 
     const previous_epoch = computePreviousEpoch(epoch_cache.epoch);
+    try altair_state.commit();
     const validators = try altair_state.validatorsSlice(allocator);
     defer allocator.free(validators);
-    epoch_cache.previous_target_unslashed_balance_increments = sumTargetUnslashedBalanceIncrements(epoch_participation.items, previous_epoch, validators);
+    epoch_cache.previous_target_unslashed_balance_increments = sumTargetUnslashedBalanceIncrements(previous_epoch_participation.items, previous_epoch, validators);
+
+    phase0_state.deinit();
+    cached_state.state.* = altair_state;
 }
 
 /// Translate_participation in https://github.com/ethereum/consensus-specs/blob/v1.1.10/specs/altair/fork.md
@@ -70,7 +79,8 @@ fn translateParticipation(allocator: Allocator, cached_state: *CachedBeaconState
 
     // translate all participations into a flat array, then convert to tree view the end
     var epoch_participation = types.altair.EpochParticipation.default_value;
-    try epoch_participation.resize(allocator, pending_attestations.len);
+    const validator_count = try cached_state.state.validatorsCount();
+    try epoch_participation.resize(allocator, validator_count);
     @memset(epoch_participation.items, 0);
 
     for (pending_attestations) |*attestation| {

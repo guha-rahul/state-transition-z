@@ -17,7 +17,7 @@ pub fn upgradeStateToElectra(allocator: Allocator, cached_state: *CachedBeaconSt
     }
 
     var state = try deneb_state.upgradeUnsafe();
-    defer deneb_state.deinit();
+    errdefer state.deinit();
 
     const new_fork: ct.phase0.Fork.Type = .{
         .previous_version = try deneb_state.forkCurrentVersion(),

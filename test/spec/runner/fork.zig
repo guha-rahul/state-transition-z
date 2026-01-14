@@ -74,7 +74,7 @@ pub fn TestCase(comptime target_fork: ForkSeq) type {
 
         fn deinit(self: *Self) void {
             self.pre.deinit();
-            if (self.post) |*post| {
+            if (self.post) |post| {
                 post.deinit();
                 self.pre.allocator.destroy(post);
             }
