@@ -165,7 +165,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         fn process(self: *Self) !void {
             const allocator = self.pre.allocator;
-            const cloned_state = try self.pre.cached_state.clone(allocator);
+            const cloned_state = try self.pre.cached_state.clone(allocator, .{ .transfer_cache = false });
             defer {
                 cloned_state.deinit();
                 allocator.destroy(cloned_state);

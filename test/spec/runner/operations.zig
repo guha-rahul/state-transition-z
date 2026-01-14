@@ -77,7 +77,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
     return struct {
         pre: TestCachedBeaconState,
         // a null post state means the test is expected to fail
-        post: ?BeaconState,
+        post: ?*BeaconState,
         op: OpType.Type,
         bls_setting: BlsSetting,
 
@@ -128,7 +128,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                 OpType.deinit(self.pre.allocator, &self.op);
             }
             self.pre.deinit();
-            if (self.post) |*post| {
+            if (self.post) |post| {
                 post.deinit();
                 self.pre.allocator.destroy(post);
             }
