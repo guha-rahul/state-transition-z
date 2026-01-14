@@ -69,8 +69,9 @@ pub fn ArrayCompositeTreeView(comptime ST: type) type {
 
         pub fn getRoot(self: *Self, index: usize) !*const [32]u8 {
             if (index >= length) return error.IndexOutOfBounds;
-            const field_node = try self.base_view.getChildNode(Gindex.fromDepth(chunk_depth, index));
-            return field_node.getRoot(self.base_view.pool);
+            const field_data = try self.base_view.getChildData(Gindex.fromDepth(chunk_depth, index));
+            try field_data.commit(self.base_view.allocator, self.base_view.pool);
+            return field_data.root.getRoot(self.base_view.pool);
         }
 
         pub fn get(self: *Self, index: usize) !Element {

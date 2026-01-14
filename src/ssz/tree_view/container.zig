@@ -68,13 +68,31 @@ pub fn ContainerTreeView(comptime ST: type) type {
         }
 
         pub fn getRootNode(self: *Self, comptime field_name: []const u8) !Node.Id {
+            const ChildST = ST.getFieldType(field_name);
             const field_gindex = Self.getGindex(field_name);
-            return try self.base_view.getChildNode(field_gindex);
+            if (comptime isBasicType(ChildST)) {
+                return try self.base_view.getChildNode(field_gindex);
+            } else {
+                const field_data = try self.base_view.getChildData(field_gindex);
+                try field_data.commit(self.base_view.allocator, self.base_view.pool);
+                return field_data.root;
+            }
         }
 
         pub fn setRootNode(self: *Self, comptime field_name: []const u8, root: Node.Id) !void {
+            const ChildST = ST.getFieldType(field_name);
             const field_gindex = Self.getGindex(field_name);
-            return try self.base_view.setChildNode(field_gindex, root);
+            if (comptime isBasicType(ChildST)) {
+                return try self.base_view.setChildNode(field_gindex, root);
+            } else {
+                const field_data = try TreeViewData.init(
+                    self.base_view.allocator,
+                    self.base_view.pool,
+                    root,
+                );
+                errdefer field_data.deinit(self.base_view.allocator, self.base_view.pool);
+                try self.base_view.setChildData(field_gindex, field_data);
+            }
         }
 
         pub fn getRoot(self: *Self, comptime field_name: []const u8) !*const [32]u8 {
