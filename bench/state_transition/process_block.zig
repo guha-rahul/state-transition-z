@@ -313,7 +313,8 @@ const ProcessBlockSegmentedBench = struct {
 };
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = gpa.allocator();
     const stdout = std.io.getStdOut().writer();
     var pool = try Node.Pool.init(allocator, 10_000_000);
     defer pool.deinit();
