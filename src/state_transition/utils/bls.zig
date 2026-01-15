@@ -23,9 +23,9 @@ pub fn verify(msg: []const u8, pk: *const PublicKey, sig: *const Signature, in_p
     try sig.verify(sig_groupcheck, msg, DST, null, pk, pk_validate);
 }
 
-threadlocal var pairing_buf: [blst.Pairing.sizeOf()]u8 = undefined;
-
 pub fn fastAggregateVerify(msg: []const u8, pks: []const PublicKey, sig: *const Signature, in_pk_validate: ?bool, in_sigs_group_check: ?bool) !bool {
+    var pairing_buf: [blst.Pairing.sizeOf()]u8 = undefined;
+
     const sigs_groupcheck = in_sigs_group_check orelse false;
     const pks_validate = in_pk_validate orelse false;
     return sig.fastAggregateVerify(sigs_groupcheck, &pairing_buf, msg[0..32], DST, pks, pks_validate) catch return false;
@@ -43,7 +43,7 @@ test "bls - sanity" {
     const msg = [_]u8{1} ** 32;
     const sig = sign(sk, &msg);
     const pk = sk.toPublicKey();
-    try verify(&msg, &pk, &sig, null, null);
+    try std.testing.expect(try verify(&msg, &pk, &sig, null, null));
 
     var pks = [_]PublicKey{pk};
     var pks_slice: []const PublicKey = pks[0..1];
