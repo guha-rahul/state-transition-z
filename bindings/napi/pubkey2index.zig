@@ -1,6 +1,7 @@
 const std = @import("std");
 const napi = @import("zapi:napi");
 const PubkeyIndexMap = @import("state_transition").PubkeyIndexMap;
+const Index2PubkeyCache = @import("state_transition").Index2PubkeyCache;
 
 /// Pool uses page allocator for internal allocations.
 /// It's recommended to never reallocate the pubkey2index after initialization.
@@ -8,37 +9,36 @@ const allocator = std.heap.page_allocator;
 
 /// A global pubkey2index for N-API bindings to use.
 pub var pubkey2index: PubkeyIndexMap = undefined;
+/// A global index2pubkey for N-API bindings to use.
+pub var index2pubkey: Index2PubkeyCache = undefined;
 var initialized: bool = false;
 
-const default_initial_capacity: u32 = 2_000_000;
+const default_initial_capacity: u32 = 0;
 
-pub fn pubkey2indexInit(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+pub fn init() !void {
     if (initialized) {
-        return env.getUndefined();
+        return;
     }
-    const initial_capacity_value = cb.getArg(0);
-    const initial_capacity = if (initial_capacity_value) |i| try i.getValueUint32() else default_initial_capacity;
 
     pubkey2index = PubkeyIndexMap.init(allocator);
-    try pubkey2index.ensureTotalCapacity(initial_capacity);
+    try pubkey2index.ensureTotalCapacity(default_initial_capacity);
+    index2pubkey = try Index2PubkeyCache.initCapacity(allocator, default_initial_capacity);
     initialized = true;
-
-    return env.getUndefined();
 }
 
-pub fn pubkey2indexDeinit(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
+pub fn deinit() void {
     if (!initialized) {
-        return env.getUndefined();
+        return;
     }
 
     pubkey2index.deinit();
+    index2pubkey.deinit();
     initialized = false;
-    return env.getUndefined();
 }
 
 pub fn pubkey2indexGet(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     if (!initialized) {
-        return error.Pubkey2IndexNotInitialized;
+        return error.PubkeyIndexNotInitialized;
     }
 
     const pubkey_info = try cb.arg(0).getTypedarrayInfo();
@@ -50,20 +50,44 @@ pub fn pubkey2indexGet(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     return try env.createUint32(@intCast(index));
 }
 
+pub fn index2pubkeyGet(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    if (!initialized) {
+        return error.PubkeyIndexNotInitialized;
+    }
+
+    const index = try cb.arg(0).getValueUint32();
+    if (index >= index2pubkey.items.len) {
+        return env.getUndefined();
+    }
+
+    // TODO expose bls classes, this is not what we want at all
+    const pubkey = index2pubkey.items[@intCast(index)];
+    var pubkey_arraybuffer_bytes: [*]u8 = undefined;
+    const pubkey_arraybuffer = try env.createArrayBuffer(48, &pubkey_arraybuffer_bytes);
+    const pubkey_array = try env.createTypedarray(.uint8, 48, pubkey_arraybuffer, 0);
+    @memcpy(pubkey_arraybuffer_bytes, &pubkey.compress());
+    return pubkey_array;
+}
+
+pub fn ensureCapacity(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    if (!initialized) {
+        return error.PubkeyIndexNotInitialized;
+    }
+
+    const old_size = index2pubkey.capacity;
+    const new_size = try cb.arg(0).getValueUint32();
+    if (new_size <= old_size) {
+        return env.getUndefined();
+    }
+    try pubkey2index.ensureTotalCapacity(new_size);
+    try index2pubkey.ensureTotalCapacity(new_size);
+    return env.getUndefined();
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const pubkey2index_obj = try env.createObject();
-    try pubkey2index_obj.setNamedProperty("init", try env.createFunction(
-        "init",
-        1,
-        pubkey2indexInit,
-        null,
-    ));
-    try pubkey2index_obj.setNamedProperty("deinit", try env.createFunction(
-        "deinit",
-        0,
-        pubkey2indexDeinit,
-        null,
-    ));
+    const index2pubkey_obj = try env.createObject();
+
     try pubkey2index_obj.setNamedProperty("get", try env.createFunction(
         "get",
         1,
@@ -71,5 +95,22 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
         null,
     ));
 
+    try index2pubkey_obj.setNamedProperty("get", try env.createFunction(
+        "get",
+        1,
+        index2pubkeyGet,
+        null,
+    ));
+
+    const ensureCapacityValue = try env.createFunction(
+        "get",
+        1,
+        index2pubkeyGet,
+        null,
+    );
+    try pubkey2index_obj.setNamedProperty("ensureCapacity", ensureCapacityValue);
+    try index2pubkey_obj.setNamedProperty("ensureCapacity", ensureCapacityValue);
+
     try exports.setNamedProperty("pubkey2index", pubkey2index_obj);
+    try exports.setNamedProperty("index2pubkey", index2pubkey_obj);
 }

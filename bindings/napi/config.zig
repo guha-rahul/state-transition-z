@@ -9,34 +9,78 @@ const ChainConfig = @import("config").ChainConfig;
 const allocator = std.heap.page_allocator;
 
 /// A global config for N-API bindings to use.
-var config: BeaconConfig = undefined;
+pub var config: BeaconConfig = undefined;
 var initialized: bool = false;
 
-pub fn configInit(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+pub fn init() void {
     if (initialized) {
-        return env.getUndefined();
+        return;
     }
 
-    if (try cb.arg(0).typeof() != .object) {
-        return error.InvalidConfig;
+    switch (active_preset) {
+        .mainnet => {
+            config = c.mainnet.config;
+        },
+        .minimal => {
+            config = c.minimal.config;
+        },
+        .gnosis => {
+            config = c.chiado.config;
+        },
     }
-    const chain_config = try chainConfigFromObject(env, cb.arg(0));
+}
+
+pub fn Config_set(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    if (!initialized) {
+        return error.ConfigNotInitialized;
+    }
+
+    const obj = try cb.arg(0).coerceToObject();
+    const chain_config = try chainConfigFromObject(env, obj);
     const genesis_validators_root_info = try cb.arg(1).getTypedarrayInfo();
     if (genesis_validators_root_info.data.len != 32) {
         return error.InvalidGenesisValidatorsRootLength;
     }
 
-    config = BeaconConfig.init(chain_config, genesis_validators_root_info.data[0..32]);
+    config = BeaconConfig.init(
+        chain_config,
+        genesis_validators_root_info.data[0..32].*,
+    );
+
     initialized = true;
 
     return env.getUndefined();
+}
+
+pub fn deinit() void {
+    if (!initialized) {
+        return;
+    }
+
+    // Free any allocated fields in config here
+    inline for (std.meta.fields(ChainConfig)) |field| {
+        switch (field.type) {
+            []const u8 => {
+                const field_value = @field(config.chain, field.name);
+                allocator.free(field_value);
+            },
+            []ChainConfig.BlobScheduleEntry => {
+                const field_value = @field(config.chain, field.name);
+                allocator.free(field_value);
+            },
+            else => {},
+        }
+    }
+
+    initialized = false;
 }
 
 pub fn chainConfigFromObject(env: napi.Env, obj: napi.Value) !ChainConfig {
     var chain_config: ChainConfig = undefined;
     inline for (std.meta.fields(ChainConfig)) |field| {
         const field_value = obj.getNamedProperty(field.name) catch |err| {
-            try env.throwError(@tagName(err), "Missing field " ++ field.name);
+            try env.throwError(@errorName(err), "Missing field " ++ field.name);
+            return error.PendingException;
         };
         switch (field.type) {
             u64 => {
@@ -112,42 +156,12 @@ pub fn chainConfigFromObject(env: napi.Env, obj: napi.Value) !ChainConfig {
     return chain_config;
 }
 
-pub fn chainDeinit(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
-    if (!initialized) {
-        return env.getUndefined();
-    }
-
-    // Free any allocated fields in config here
-    inline for (std.meta.fields(ChainConfig)) |field| {
-        switch (field.type) {
-            []const u8 => {
-                const field_value = @field(config, field.name);
-                allocator.free(field_value);
-            },
-            []ChainConfig.BlobScheduleEntry => {
-                const field_value = @field(config, field.name);
-                allocator.free(field_value);
-            },
-            else => {},
-        }
-    }
-
-    initialized = false;
-    return env.getUndefined();
-}
-
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const config_obj = try env.createObject();
-    try config_obj.setNamedProperty("init", try env.createFunction(
-        "init",
+    try config_obj.setNamedProperty("set", try env.createFunction(
+        "set",
         2,
-        configInit,
-        null,
-    ));
-    try config_obj.setNamedProperty("deinit", try env.createFunction(
-        "deinit",
-        0,
-        chainDeinit,
+        Config_set,
         null,
     ));
 

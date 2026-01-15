@@ -7,44 +7,50 @@ const Node = @import("persistent_merkle_tree").Node;
 const allocator = std.heap.page_allocator;
 
 /// A global pool for N-API bindings to use.
-var pool: Node.Pool = undefined;
+pub var pool: Node.Pool = undefined;
 var initialized: bool = false;
 
-pub fn poolInit(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+const default_pool_size: u32 = 0;
+
+pub fn init() !void {
     if (initialized) {
-        return env.getUndefined();
+        return;
     }
 
-    const pool_size = try cb.arg(0).getValueUint32();
-    pool = try Node.Pool.init(allocator, pool_size);
+    pool = try Node.Pool.init(allocator, default_pool_size);
     initialized = true;
-    return env.getUndefined();
 }
 
-pub fn poolDeinit(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
+pub fn deinit() void {
     if (!initialized) {
-        return env.getUndefined();
+        return;
     }
 
     pool.deinit();
     initialized = false;
+}
+
+pub fn Pool_ensureCapacity(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    if (!initialized) {
+        return error.PoolNotInitialized;
+    }
+
+    const old_size = pool.nodes.capacity;
+    const new_size = try cb.arg(0).getValueUint32();
+    if (new_size <= old_size) {
+        return env.getUndefined();
+    }
+    try pool.preheat(@intCast(new_size - pool.nodes.capacity));
     return env.getUndefined();
 }
 
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const pool_obj = try env.createObject();
-    try pool_obj.setNamedProperty("init", try env.createFunction(
-        "init",
+    try pool_obj.setNamedProperty("ensureCapacity", try env.createFunction(
+        "ensureCapacity",
         1,
-        poolInit,
+        Pool_ensureCapacity,
         null,
     ));
-    try pool_obj.setNamedProperty("deinit", try env.createFunction(
-        "deinit",
-        0,
-        poolDeinit,
-        null,
-    ));
-
     try exports.setNamedProperty("pool", pool_obj);
 }
