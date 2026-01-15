@@ -197,6 +197,9 @@ pub fn stateTransition(
         if (!std.mem.eql(u8, post_state_root, &block_state_root)) {
             return error.InvalidStateRoot;
         }
+    } else {
+        // Even if we don't verify the state_root, commit the tree changes
+        try post_state.state.commit();
     }
 
     return post_state;
