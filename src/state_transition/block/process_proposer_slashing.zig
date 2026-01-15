@@ -14,7 +14,7 @@ pub fn processProposerSlashing(
 ) !void {
     try assertValidProposerSlashing(cached_state, proposer_slashing, verify_signatures);
     const proposer_index = proposer_slashing.signed_header_1.message.proposer_index;
-    try slashValidator(@constCast(cached_state), proposer_index, null);
+    try slashValidator(cached_state, proposer_index, null);
 }
 
 pub fn assertValidProposerSlashing(
