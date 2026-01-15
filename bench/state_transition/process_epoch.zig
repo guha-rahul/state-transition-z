@@ -379,7 +379,7 @@ const ProcessEpochSegmentedBench = struct {
         const epoch_start = std.time.nanoTimestamp();
 
         const jf_start = std.time.nanoTimestamp();
-            state_transition.processJustificationAndFinalization(cloned, cache) catch unreachable;
+        state_transition.processJustificationAndFinalization(cloned, cache) catch unreachable;
         recordSegment(.justification_finalization, elapsedSince(jf_start));
 
         if (state.forkSeq().gte(.altair)) {
@@ -393,7 +393,7 @@ const ProcessEpochSegmentedBench = struct {
         recordSegment(.registry_updates, elapsedSince(registry_start));
 
         const slashings_start = std.time.nanoTimestamp();
-            state_transition.processSlashings(allocator, cloned, cache) catch unreachable;
+        state_transition.processSlashings(allocator, cloned, cache) catch unreachable;
         recordSegment(.slashings, elapsedSince(slashings_start));
 
         const rewards_start = std.time.nanoTimestamp();
@@ -401,7 +401,7 @@ const ProcessEpochSegmentedBench = struct {
         recordSegment(.rewards_and_penalties, elapsedSince(rewards_start));
 
         const eth1_start = std.time.nanoTimestamp();
-            state_transition.processEth1DataReset(cloned, cache) catch unreachable;
+        state_transition.processEth1DataReset(cloned, cache) catch unreachable;
         recordSegment(.eth1_data_reset, elapsedSince(eth1_start));
 
         if (state.forkSeq().gte(.electra)) {
@@ -415,7 +415,7 @@ const ProcessEpochSegmentedBench = struct {
         }
 
         const eb_start = std.time.nanoTimestamp();
-            _ = state_transition.processEffectiveBalanceUpdates(allocator, cloned, cache) catch unreachable;
+        _ = state_transition.processEffectiveBalanceUpdates(allocator, cloned, cache) catch unreachable;
         recordSegment(.effective_balance_updates, elapsedSince(eb_start));
 
         const slashings_reset_start = std.time.nanoTimestamp();
@@ -442,7 +442,7 @@ const ProcessEpochSegmentedBench = struct {
             recordSegment(.participation_record, elapsedSince(participation_record_start));
         } else {
             const participation_flag_start = std.time.nanoTimestamp();
-                state_transition.processParticipationFlagUpdates(cloned) catch unreachable;
+            state_transition.processParticipationFlagUpdates(cloned) catch unreachable;
             recordSegment(.participation_flags, elapsedSince(participation_flag_start));
         }
 
