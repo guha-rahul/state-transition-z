@@ -165,6 +165,7 @@ pub fn CompositeChunks(
                 base_view.pool,
                 root,
             );
+            errdefer child_view.deinit();
             try set(base_view, index, child_view);
         }
 

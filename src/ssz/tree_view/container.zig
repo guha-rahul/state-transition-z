@@ -239,6 +239,7 @@ pub fn ContainerTreeView(comptime ST: type) type {
                     self.base_view.pool,
                     root,
                 );
+                errdefer child_view.deinit();
                 try self.set(field_name, child_view);
             }
         }

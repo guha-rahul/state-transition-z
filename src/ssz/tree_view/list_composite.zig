@@ -79,7 +79,7 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
         pub fn getRoot(self: *Self, index: usize) !*const [32]u8 {
             const field_data = try self.base_view.getChildData(Gindex.fromDepth(chunk_depth, index));
             try field_data.commit(self.base_view.allocator, self.base_view.pool);
-            return field_data.base_view.root.getRoot(self.base_view.pool);
+            return field_data.root.getRoot(self.base_view.pool);
         }
 
         pub fn get(self: *Self, index: usize) !Element {
@@ -243,6 +243,7 @@ pub fn ListCompositeTreeView(comptime ST: type) type {
 
         pub fn fromValue(allocator: Allocator, pool: *Node.Pool, value: *const ST.Type) !Self {
             const root = try ST.tree.fromValue(pool, value);
+            errdefer pool.unref(root);
             return try Self.init(allocator, pool, root);
         }
 

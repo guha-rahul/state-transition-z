@@ -786,6 +786,7 @@ pub const BeaconState = union(ForkSeq) {
                         var field_view = try committed_state.get(f.name);
                         const FieldView = @TypeOf(field_view);
                         const owned_field_view: FieldView = try field_view.clone(.{});
+                        errdefer owned_field_view.deinit();
                         try upgraded.set(f.name, owned_field_view);
                     }
                 } else {
@@ -797,6 +798,7 @@ pub const BeaconState = union(ForkSeq) {
                         var field_view = try committed_state.get(f.name);
                         const FieldView = @TypeOf(field_view);
                         const owned_field_view: FieldView = try field_view.clone(.{});
+                        errdefer owned_field_view.deinit();
                         try upgraded.set(f.name, owned_field_view);
                     }
                 }
