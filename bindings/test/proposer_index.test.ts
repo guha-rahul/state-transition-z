@@ -16,22 +16,12 @@ describe("computeProposerIndex", () => {
   }
 
   it("should compute proposer index for phase0", () => {
-    const result = bindings.computeProposerIndex(
-      "phase0",
-      effectiveBalanceIncrements,
-      indices,
-      seed
-    );
+    const result = bindings.computeProposerIndex("phase0", effectiveBalanceIncrements, indices, seed);
     expect(result).toBe(789);
   });
 
   it("should compute proposer index for electra", () => {
-    const result = bindings.computeProposerIndex(
-      "electra",
-      effectiveBalanceIncrements,
-      indices,
-      seed
-    );
+    const result = bindings.computeProposerIndex("electra", effectiveBalanceIncrements, indices, seed);
     expect(result).toBe(161);
   });
 
@@ -40,12 +30,7 @@ describe("computeProposerIndex", () => {
     const expected = 789;
 
     for (const fork of forks) {
-      const result = bindings.computeProposerIndex(
-        fork,
-        effectiveBalanceIncrements,
-        indices,
-        seed
-      );
+      const result = bindings.computeProposerIndex(fork, effectiveBalanceIncrements, indices, seed);
       expect(result).toBe(expected);
     }
   });
@@ -55,20 +40,15 @@ describe("computeProposerIndex", () => {
     const expected = 161;
 
     for (const fork of forks) {
-      const result = bindings.computeProposerIndex(
-        fork,
-        effectiveBalanceIncrements,
-        indices,
-        seed
-      );
+      const result = bindings.computeProposerIndex(fork, effectiveBalanceIncrements, indices, seed);
       expect(result).toBe(expected);
     }
   });
 
   it("should throw on invalid seed length", () => {
     const shortSeed = new Uint8Array(16);
-    expect(() =>
-      bindings.computeProposerIndex("phase0", effectiveBalanceIncrements, indices, shortSeed)
-    ).toThrow("InvalidSeedLength");
+    expect(() => bindings.computeProposerIndex("phase0", effectiveBalanceIncrements, indices, shortSeed)).toThrow(
+      "InvalidSeedLength"
+    );
   });
 });
