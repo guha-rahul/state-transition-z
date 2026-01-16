@@ -15,14 +15,13 @@ pub fn BeaconStateView_finalize(_: napi.Env, cached_state: *CachedBeaconState, _
     allocator.destroy(cached_state);
 }
 
-var ctor: napi.Value = undefined;
-
 pub fn BeaconStateView_ctor(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try allocator.create(CachedBeaconState);
     errdefer allocator.destroy(cached_state);
 
     _ = try env.wrap(
         cb.this(),
+        CachedBeaconState,
         cached_state,
         BeaconStateView_finalize,
         null,
@@ -32,6 +31,8 @@ pub fn BeaconStateView_ctor(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value
 }
 
 pub fn BeaconStateView_createFromBytes(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const ctor = cb.this();
+
     var fork_name_buf: [16]u8 = undefined;
     const fork_name = try cb.arg(0).getValueStringUtf8(&fork_name_buf);
     const fork = c.ForkSeq.fromName(fork_name);
@@ -55,23 +56,32 @@ pub fn BeaconStateView_createFromBytes(env: napi.Env, cb: napi.CallbackInfo(2)) 
             .index_to_pubkey = &pubkey.index2pubkey,
             .pubkey_to_index = &pubkey.pubkey2index,
         },
-        .{},
+        null,
     );
 
     return cached_state_value;
 }
 
+pub fn BeaconStateView_slot(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const slot = try cached_state.state.slot();
+    return try env.createInt64(@intCast(slot));
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
-    const beacon_state_view = try env.defineClass(
+    const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
         0,
         BeaconStateView_ctor,
         null,
         &[_]napi.c.napi_property_descriptor{.{
-            .utf8name = "createFromBytes",
-            .method = BeaconStateView_createFromBytes,
-            .attributes = napi.c.napi_static,
+            .utf8name = "slot",
+            .getter = napi.wrapCallback(0, BeaconStateView_slot),
         }},
     );
-    try exports.setNamedProperty("BeaconStateView", beacon_state_view);
+    try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
+        .utf8name = "createFromBytes",
+        .method = napi.wrapCallback(2, BeaconStateView_createFromBytes),
+    }});
+    try exports.setNamedProperty("BeaconStateView", beacon_state_view_ctor);
 }
