@@ -424,16 +424,19 @@ pub const BeaconState = union(ForkSeq) {
                 var current_epoch_participation = try state.get("current_epoch_participation");
                 try current_epoch_participation.commit();
                 const length = try current_epoch_participation.length();
-                try state.set("previous_epoch_participation", try current_epoch_participation.clone(.{}));
+                try state.set(
+                    "previous_epoch_participation",
+                    // cannot set without cloning because the original is owned by the tree
+                    // we need to clone it to create an owned tree
+                    try current_epoch_participation.clone(.{ .transfer_cache = true }),
+                );
 
                 // Reset current_epoch_participation by rebuilding a zeroed SSZ List of the same length.
-                // SSZ List root is a branch node:
-                // - left = chunks subtree
-                // - right = length leaf
-                const new_current_root = try state.base_view.pool.createBranch(
-                    @enumFromInt(ct.altair.EpochParticipation.chunk_depth),
-                    try state.base_view.pool.createLeafFromUint(length),
+                const new_current_root = try ct.altair.EpochParticipation.tree.zeros(
+                    state.base_view.pool,
+                    length,
                 );
+                errdefer state.base_view.pool.unref(new_current_root);
                 try state.setRootNode("current_epoch_participation", new_current_root);
             },
         };
