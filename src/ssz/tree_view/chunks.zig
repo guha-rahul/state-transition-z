@@ -160,7 +160,7 @@ pub fn CompositeChunks(
         pub fn setValue(base_view: *BaseTreeView, index: usize, value: *const ST.Element.Type) !void {
             const root = try ST.Element.tree.fromValue(base_view.pool, value);
             errdefer base_view.pool.unref(root);
-            const child_view = try ST.Element.TreeView.init(
+            var child_view = try ST.Element.TreeView.init(
                 base_view.allocator,
                 base_view.pool,
                 root,

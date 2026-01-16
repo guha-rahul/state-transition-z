@@ -234,7 +234,7 @@ pub fn ContainerTreeView(comptime ST: type) type {
             } else {
                 const root = try ChildST.tree.fromValue(self.base_view.pool, value);
                 errdefer self.base_view.pool.unref(root);
-                const child_view = try ChildST.TreeView.init(
+                var child_view = try ChildST.TreeView.init(
                     self.base_view.allocator,
                     self.base_view.pool,
                     root,
