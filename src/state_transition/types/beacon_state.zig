@@ -330,8 +330,9 @@ pub const BeaconState = union(ForkSeq) {
         };
     }
 
-    // Returns a read-only slice of validators.
-    // Caller owns the returned slice and must free it with the same allocator.
+    /// Returns a read-only slice of validators.
+    /// This is read-only in the sense that modifications will not be reflected back to the state.
+    /// Caller owns the returned slice and must free it with the same allocator.
     pub fn validatorsSlice(self: *BeaconState, allocator: Allocator) ![]ct.phase0.Validator.Type {
         return switch (self.*) {
             inline else => |*state| {
@@ -344,6 +345,25 @@ pub const BeaconState = union(ForkSeq) {
     pub fn balances(self: *BeaconState) !ct.phase0.Balances.TreeView {
         return switch (self.*) {
             inline else => |*state| try state.get("balances"),
+        };
+    }
+
+    /// Returns a read-only slice of balances.
+    /// This is read-only in the sense that modifications will not be reflected back to the state.
+    /// Caller owns the returned slice and must free it with the same allocator.
+    pub fn balancesSlice(self: *BeaconState, allocator: Allocator) ![]u64 {
+        return switch (self.*) {
+            inline else => |*state| {
+                var balances_view = try state.get("balances");
+                try balances_view.commit();
+                return balances_view.getAll(allocator);
+            },
+        };
+    }
+
+    pub fn setBalances(self: *BeaconState, b: *const ct.phase0.Balances.Type) !void {
+        return switch (self.*) {
+            inline else => |*state| try state.setValue("balances", b),
         };
     }
 
