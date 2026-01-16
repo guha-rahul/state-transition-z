@@ -127,6 +127,23 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                if (comptime isBasicType(Element)) {
+                    return @enumFromInt(chunk_depth);
+                } else {
+                    var nodes: [chunk_count]Node.Id = undefined;
+
+                    const element_default = try Element.tree.default(pool);
+                    defer pool.free(&element_default);
+
+                    for (0..chunk_count) |i| {
+                        nodes[i] = element_default;
+                    }
+
+                    return try Node.fillWithContents(pool, &nodes, chunk_depth);
+                }
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 if (data.len != fixed_size) {
                     return error.InvalidSize;
@@ -386,6 +403,19 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                var nodes: [chunk_count]Node.Id = undefined;
+
+                const element_default = try Element.tree.default(pool);
+                defer pool.unref(element_default);
+
+                for (0..chunk_count) |i| {
+                    nodes[i] = element_default;
+                }
+
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 if (data.len > max_size or data.len < min_size) {
                     return error.InvalidSize;
@@ -972,6 +1002,12 @@ test "FixedVectorType - default_root" {
 
     try VectorU64.hashTreeRoot(&VectorU64.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &expected_root, &VectorU64.default_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node = try VectorU64.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
 }
 
 test "VariableVectorType - default_root" {
@@ -981,4 +1017,10 @@ test "VariableVectorType - default_root" {
 
     try VectorList.hashTreeRoot(std.testing.allocator, &VectorList.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &expected_root, &VectorList.default_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node = try VectorList.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
 }

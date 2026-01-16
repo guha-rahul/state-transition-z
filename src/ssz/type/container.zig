@@ -158,6 +158,19 @@ pub fn FixedContainerType(comptime ST: type) type {
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                var nodes: [chunk_count]Node.Id = undefined;
+                errdefer pool.free(&nodes);
+                inline for (fields, 0..) |field, i| {
+                    if (comptime isBasicType(field.type)) {
+                        nodes[i] = @enumFromInt(0);
+                    } else {
+                        nodes[i] = try field.type.tree.default(pool);
+                    }
+                }
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 if (data.len != fixed_size) {
                     return error.InvalidSize;
@@ -604,6 +617,19 @@ pub fn VariableContainerType(comptime ST: type) type {
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                var nodes: [chunk_count]Node.Id = undefined;
+                errdefer pool.free(&nodes);
+                inline for (fields, 0..) |field, i| {
+                    if (comptime isBasicType(field.type)) {
+                        nodes[i] = @enumFromInt(0);
+                    } else {
+                        nodes[i] = try field.type.tree.default(pool);
+                    }
+                }
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 if (data.len > max_size or data.len < min_size) {
                     return error.InvalidSize;
@@ -1237,6 +1263,12 @@ test "FixedContainerType - default_root" {
 
     try Container.hashTreeRoot(&Container.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &expected_root, &Container.default_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node = try Container.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
 }
 
 test "VariableContainerType - default_root" {
@@ -1248,4 +1280,10 @@ test "VariableContainerType - default_root" {
 
     try Container.hashTreeRoot(std.testing.allocator, &Container.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &expected_root, &Container.default_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node = try Container.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
 }

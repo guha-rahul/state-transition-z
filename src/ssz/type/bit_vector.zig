@@ -222,6 +222,10 @@ pub fn BitVectorType(comptime _length: comptime_int) type {
         };
 
         pub const tree = struct {
+            pub fn default(_: *Node.Pool) !Node.Id {
+                return @enumFromInt(chunk_depth);
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 try serialized.validate(data);
 
@@ -647,4 +651,13 @@ test "BitVectorType - default_root" {
     const Bits513 = BitVectorType(513);
     try Bits513.hashTreeRoot(&Bits513.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &Bits513.default_root, &expected_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node_128 = try Bits128.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &Bits128.default_root, node_128.getRoot(&pool));
+
+    const node_513 = try Bits513.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &Bits513.default_root, node_513.getRoot(&pool));
 }

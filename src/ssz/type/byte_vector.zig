@@ -80,6 +80,10 @@ pub fn ByteVectorType(comptime _length: comptime_int) type {
         };
 
         pub const tree = struct {
+            pub fn default(_: *Node.Pool) !Node.Id {
+                return @enumFromInt(chunk_depth);
+            }
+
             pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
                 if (data.len != fixed_size) {
                     return error.InvalidSize;
@@ -425,4 +429,16 @@ test "ByteVectorType - default_root" {
     const ByteVector96 = ByteVectorType(96);
     try ByteVector96.hashTreeRoot(&ByteVector96.default_value, &expected_root);
     try std.testing.expectEqualSlices(u8, &expected_root, &ByteVector96.default_root);
+
+    var pool = try Node.Pool.init(std.testing.allocator, 1024);
+    defer pool.deinit();
+
+    const node_4 = try ByteVector4.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &ByteVector4.default_root, node_4.getRoot(&pool));
+
+    const node_32 = try ByteVector32.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &ByteVector32.default_root, node_32.getRoot(&pool));
+
+    const node_96 = try ByteVector96.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &ByteVector96.default_root, node_96.getRoot(&pool));
 }
