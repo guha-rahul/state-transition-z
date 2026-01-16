@@ -29,6 +29,7 @@ type Bindings = {
     computePreviousEpoch: (epoch: number) => number;
     computeSyncPeriodAtSlot: (slot: number) => number;
     computeSyncPeriodAtEpoch: (epoch: number) => number;
+    isStartSlotOfEpoch: (slot: number) => boolean;
   };
   deinit: () => void;
 };
