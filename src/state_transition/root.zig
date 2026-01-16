@@ -71,6 +71,8 @@ pub const processConsolidationRequest = @import("./block/process_consolidation_r
 pub const getBlockRootAtSlot = @import("./utils/block_root.zig").getBlockRootAtSlot;
 pub const computeStartSlotAtEpoch = @import("./utils/epoch.zig").computeStartSlotAtEpoch;
 pub const computeEpochAtSlot = @import("./utils/epoch.zig").computeEpochAtSlot;
+pub const computeCheckpointEpochAtStateSlot = @import("./utils/epoch.zig").computeCheckpointEpochAtStateSlot;
+pub const computeEndSlotAtEpoch = @import("./utils/epoch.zig").computeEndSlotAtEpoch;
 pub const deinitStateTransition = @import("./state_transition.zig").deinitStateTransition;
 
 pub const WithdrawalsResult = @import("./block/process_withdrawals.zig").WithdrawalsResult;

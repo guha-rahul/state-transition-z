@@ -23,6 +23,8 @@ type Bindings = {
   epoch: {
     computeEpochAtSlot: (slot: number) => number;
     computeStartSlotAtEpoch: (epoch: number) => number;
+    computeCheckpointEpochAtStateSlot: (slot: number) => number;
+    computeEndSlotAtEpoch: (epoch: number) => number;
   };
   deinit: () => void;
 };

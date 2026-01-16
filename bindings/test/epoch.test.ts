@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest";
 
 const bindings = await import("../src/index.ts");
-const {computeEpochAtSlot, computeStartSlotAtEpoch} = bindings.default.epoch;
+const {computeEpochAtSlot, computeStartSlotAtEpoch, computeCheckpointEpochAtStateSlot, computeEndSlotAtEpoch} = bindings.default.epoch;
 
 const SLOTS_PER_EPOCH = 32;
 
@@ -61,6 +61,29 @@ describe("epoch", () => {
         const slot = computeStartSlotAtEpoch(epoch);
         expect(computeEpochAtSlot(slot)).toBe(epoch);
       }
+    });
+  });
+
+  describe("computeCheckpointEpochAtStateSlot", () => {
+    it("should return same epoch at start slot, next epoch otherwise", () => {
+      expect(computeCheckpointEpochAtStateSlot(0)).toBe(0);
+      expect(computeCheckpointEpochAtStateSlot(1)).toBe(1);
+      expect(computeCheckpointEpochAtStateSlot(SLOTS_PER_EPOCH)).toBe(1);
+    });
+
+    it("should throw for negative slot", () => {
+      expect(() => computeCheckpointEpochAtStateSlot(-1)).toThrow("InvalidSlot");
+    });
+  });
+
+  describe("computeEndSlotAtEpoch", () => {
+    it("should return last slot of epoch", () => {
+      expect(computeEndSlotAtEpoch(0)).toBe(SLOTS_PER_EPOCH - 1);
+      expect(computeEndSlotAtEpoch(1)).toBe(SLOTS_PER_EPOCH * 2 - 1);
+    });
+
+    it("should throw for negative epoch", () => {
+      expect(() => computeEndSlotAtEpoch(-1)).toThrow("InvalidEpoch");
     });
   });
 });
