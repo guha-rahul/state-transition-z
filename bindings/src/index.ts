@@ -11,6 +11,7 @@ declare class BeaconStateView {
   root: Uint8Array;
   epoch: number;
   genesisTime: number;
+  genesisValidatorsRoot: Uint8Array;
 }
 
 type Bindings = {

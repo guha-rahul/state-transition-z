@@ -90,6 +90,15 @@ pub fn BeaconStateView_genesisTime(env: napi.Env, cb: napi.CallbackInfo(0)) !nap
     return try env.createInt64(@intCast(try cached_state.state.genesisTime()));
 }
 
+pub fn BeaconStateView_genesisValidatorsRoot(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const root = try cached_state.state.genesisValidatorsRoot();
+    var bytes: [*]u8 = undefined;
+    const buf = try env.createArrayBuffer(32, &bytes);
+    @memcpy(bytes[0..32], root);
+    return try env.createTypedarray(.uint8, 32, buf, 0);
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -101,6 +110,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "root", .getter = napi.wrapCallback(0, BeaconStateView_root) },
             .{ .utf8name = "epoch", .getter = napi.wrapCallback(0, BeaconStateView_epoch) },
             .{ .utf8name = "genesisTime", .getter = napi.wrapCallback(0, BeaconStateView_genesisTime) },
+            .{ .utf8name = "genesisValidatorsRoot", .getter = napi.wrapCallback(0, BeaconStateView_genesisValidatorsRoot) },
         },
     );
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
