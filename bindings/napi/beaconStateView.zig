@@ -123,6 +123,19 @@ pub fn BeaconStateView_latestBlockHeader(env: napi.Env, cb: napi.CallbackInfo(0)
     return obj;
 }
 
+pub fn BeaconStateView_previousJustifiedCheckpoint(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    var cp: types.phase0.Checkpoint.Type = undefined;
+    try cached_state.state.previousJustifiedCheckpoint(&cp);
+    const obj = try env.createObject();
+    try obj.setNamedProperty("epoch", try env.createInt64(@intCast(cp.epoch)));
+    var bytes: [*]u8 = undefined;
+    const buf = try env.createArrayBuffer(32, &bytes);
+    @memcpy(bytes[0..32], &cp.root);
+    try obj.setNamedProperty("root", try env.createTypedarray(.uint8, 32, buf, 0));
+    return obj;
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -136,6 +149,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "genesisTime", .getter = napi.wrapCallback(0, BeaconStateView_genesisTime) },
             .{ .utf8name = "genesisValidatorsRoot", .getter = napi.wrapCallback(0, BeaconStateView_genesisValidatorsRoot) },
             .{ .utf8name = "latestBlockHeader", .getter = napi.wrapCallback(0, BeaconStateView_latestBlockHeader) },
+            .{ .utf8name = "previousJustifiedCheckpoint", .getter = napi.wrapCallback(0, BeaconStateView_previousJustifiedCheckpoint) },
         },
     );
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{

@@ -13,6 +13,11 @@ interface BeaconBlockHeader {
   bodyRoot: Uint8Array;
 }
 
+interface Checkpoint {
+  epoch: number;
+  root: Uint8Array;
+}
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -21,6 +26,7 @@ declare class BeaconStateView {
   genesisTime: number;
   genesisValidatorsRoot: Uint8Array;
   latestBlockHeader: BeaconBlockHeader;
+  previousJustifiedCheckpoint: Checkpoint;
 }
 
 type Bindings = {
