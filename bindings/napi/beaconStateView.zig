@@ -180,6 +180,15 @@ pub fn BeaconStateView_proposersNextEpoch(env: napi.Env, cb: napi.CallbackInfo(0
     return env.getNull();
 }
 
+// getBalance(index: number): bigint
+pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const index: u64 = @intCast(try cb.arg(0).getValueInt64());
+    var balances = try cached_state.state.balances();
+    const balance = try balances.get(index);
+    return try env.createBigintUint64(balance);
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -198,11 +207,14 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "finalizedCheckpoint", .getter = napi.wrapCallback(0, BeaconStateView_finalizedCheckpoint) },
             .{ .utf8name = "proposers", .getter = napi.wrapCallback(0, BeaconStateView_proposers) },
             .{ .utf8name = "proposersNextEpoch", .getter = napi.wrapCallback(0, BeaconStateView_proposersNextEpoch) },
+            .{ .utf8name = "getBalance", .method = napi.wrapCallback(1, BeaconStateView_getBalance) },
         },
     );
+    // Static method on constructor
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
         .utf8name = "createFromBytes",
         .method = napi.wrapCallback(2, BeaconStateView_createFromBytes),
     }});
+
     try exports.setNamedProperty("BeaconStateView", beacon_state_view_ctor);
 }

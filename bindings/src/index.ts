@@ -31,6 +31,7 @@ declare class BeaconStateView {
   finalizedCheckpoint: Checkpoint;
   proposers: number[];
   proposersNextEpoch: number[] | null;
+  getBalance(index: number): bigint;
 }
 
 type Bindings = {
