@@ -4,6 +4,7 @@ const c = @import("config");
 const BeaconState = @import("state_transition").BeaconState;
 const CachedBeaconState = @import("state_transition").CachedBeaconState;
 const preset = @import("preset").preset;
+const types = @import("consensus_types");
 const pool = @import("./pool.zig");
 const config = @import("./config.zig");
 const pubkey = @import("./pubkey2index.zig");
@@ -99,6 +100,29 @@ pub fn BeaconStateView_genesisValidatorsRoot(env: napi.Env, cb: napi.CallbackInf
     return try env.createTypedarray(.uint8, 32, buf, 0);
 }
 
+pub fn BeaconStateView_latestBlockHeader(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    var header_view = try cached_state.state.latestBlockHeader();
+    var header: types.phase0.BeaconBlockHeader.Type = undefined;
+    try header_view.toValue(allocator, &header);
+    const obj = try env.createObject();
+    try obj.setNamedProperty("slot", try env.createInt64(@intCast(header.slot)));
+    try obj.setNamedProperty("proposerIndex", try env.createInt64(@intCast(header.proposer_index)));
+    var pr: [*]u8 = undefined;
+    const pr_buf = try env.createArrayBuffer(32, &pr);
+    @memcpy(pr[0..32], &header.parent_root);
+    try obj.setNamedProperty("parentRoot", try env.createTypedarray(.uint8, 32, pr_buf, 0));
+    var sr: [*]u8 = undefined;
+    const sr_buf = try env.createArrayBuffer(32, &sr);
+    @memcpy(sr[0..32], &header.state_root);
+    try obj.setNamedProperty("stateRoot", try env.createTypedarray(.uint8, 32, sr_buf, 0));
+    var br: [*]u8 = undefined;
+    const br_buf = try env.createArrayBuffer(32, &br);
+    @memcpy(br[0..32], &header.body_root);
+    try obj.setNamedProperty("bodyRoot", try env.createTypedarray(.uint8, 32, br_buf, 0));
+    return obj;
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -111,6 +135,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "epoch", .getter = napi.wrapCallback(0, BeaconStateView_epoch) },
             .{ .utf8name = "genesisTime", .getter = napi.wrapCallback(0, BeaconStateView_genesisTime) },
             .{ .utf8name = "genesisValidatorsRoot", .getter = napi.wrapCallback(0, BeaconStateView_genesisValidatorsRoot) },
+            .{ .utf8name = "latestBlockHeader", .getter = napi.wrapCallback(0, BeaconStateView_latestBlockHeader) },
         },
     );
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{

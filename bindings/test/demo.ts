@@ -26,3 +26,4 @@ console.log(state.root);
 console.log(state.epoch);
 console.log(state.genesisTime);
 console.log(state.genesisValidatorsRoot);
+console.log(state.latestBlockHeader);

@@ -5,6 +5,14 @@ import {join} from "node:path";
 
 const require = createRequire(import.meta.url);
 
+interface BeaconBlockHeader {
+  slot: number;
+  proposerIndex: number;
+  parentRoot: Uint8Array;
+  stateRoot: Uint8Array;
+  bodyRoot: Uint8Array;
+}
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -12,6 +20,7 @@ declare class BeaconStateView {
   epoch: number;
   genesisTime: number;
   genesisValidatorsRoot: Uint8Array;
+  latestBlockHeader: BeaconBlockHeader;
 }
 
 type Bindings = {
