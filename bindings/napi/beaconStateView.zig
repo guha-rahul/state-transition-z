@@ -3,6 +3,7 @@ const napi = @import("zapi:napi");
 const c = @import("config");
 const BeaconState = @import("state_transition").BeaconState;
 const CachedBeaconState = @import("state_transition").CachedBeaconState;
+const preset = @import("preset").preset;
 const pool = @import("./pool.zig");
 const config = @import("./config.zig");
 const pubkey = @import("./pubkey2index.zig");
@@ -78,6 +79,12 @@ pub fn BeaconStateView_root(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value
     return typedarray;
 }
 
+pub fn BeaconStateView_epoch(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const slot = try cached_state.state.slot();
+    return try env.createInt64(@intCast(slot / preset.SLOTS_PER_EPOCH));
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -87,6 +94,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
         &[_]napi.c.napi_property_descriptor{
             .{ .utf8name = "slot", .getter = napi.wrapCallback(0, BeaconStateView_slot) },
             .{ .utf8name = "root", .getter = napi.wrapCallback(0, BeaconStateView_root) },
+            .{ .utf8name = "epoch", .getter = napi.wrapCallback(0, BeaconStateView_epoch) },
         },
     );
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
