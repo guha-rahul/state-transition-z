@@ -8,6 +8,7 @@ const SignedBeaconBlock = state_transition.SignedBeaconBlock;
 const SignedBlock = state_transition.SignedBlock;
 const isExecutionEnabledFunc = state_transition.isExecutionEnabled;
 const computeUnrealizedCheckpoints = state_transition.computeUnrealizedCheckpoints;
+const getEffectiveBalanceIncrementsZeroInactiveFn = state_transition.getEffectiveBalanceIncrementsZeroInactive;
 const preset = @import("preset").preset;
 const types = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -185,7 +186,6 @@ pub fn BeaconStateView_proposersNextEpoch(env: napi.Env, cb: napi.CallbackInfo(0
     return env.getNull();
 }
 
-// getBalance(index: number): bigint
 pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
     const index: u64 = @intCast(try cb.arg(0).getValueInt64());
@@ -194,7 +194,6 @@ pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi
     return try env.createBigintUint64(balance);
 }
 
-// isExecutionEnabled(forkName: string, signedBlockBytes: Uint8Array): boolean
 pub fn BeaconStateView_isExecutionEnabled(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
@@ -215,7 +214,23 @@ pub fn BeaconStateView_isExecutionEnabled(env: napi.Env, cb: napi.CallbackInfo(2
     return try env.getBoolean(result);
 }
 
-// isExecutionStateType(): boolean
+pub fn BeaconStateView_getEffectiveBalanceIncrementsZeroInactive(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var result = try getEffectiveBalanceIncrementsZeroInactiveFn(allocator, cached_state);
+    defer result.deinit();
+
+    const validator_count = result.items.len;
+
+    // Create Uint16Array to return
+    var arraybuffer_bytes: [*]u8 = undefined;
+    const arraybuffer = try env.createArrayBuffer(validator_count * 2, &arraybuffer_bytes);
+    const dest = @as([*]u16, @ptrCast(@alignCast(arraybuffer_bytes)));
+    @memcpy(dest[0..validator_count], result.items);
+
+    return try env.createTypedarray(.uint16, validator_count, arraybuffer, 0);
+}
+
 pub fn BeaconStateView_isExecutionStateType(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
     const fork_seq = cached_state.state.forkSeq();
@@ -268,6 +283,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getBalance", .method = napi.wrapCallback(1, BeaconStateView_getBalance) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
+            .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },
             .{ .utf8name = "getFinalizedRootProof", .method = napi.wrapCallback(0, BeaconStateView_getFinalizedRootProof) },
             .{ .utf8name = "computeUnrealizedCheckpoints", .method = napi.wrapCallback(0, BeaconStateView_computeUnrealizedCheckpoints) },
         },

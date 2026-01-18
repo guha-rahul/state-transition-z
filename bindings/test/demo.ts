@@ -36,4 +36,5 @@ console.log("getBalance(0):", state.getBalance(0));
 console.log("getBalance(100):", state.getBalance(100));
 console.log("getFinalizedRootProof():", state.getFinalizedRootProof());
 console.log("isExecutionStateType():", state.isExecutionStateType());
+console.log("getEffectiveBalanceIncrementsZeroInactive() length:", state.getEffectiveBalanceIncrementsZeroInactive().length);
 console.log("computeUnrealizedCheckpoints():", state.computeUnrealizedCheckpoints());
