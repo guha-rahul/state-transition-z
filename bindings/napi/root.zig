@@ -1,6 +1,6 @@
 const napi = @import("zapi:napi");
 const pool = @import("./pool.zig");
-const pubkey2index = @import("./pubkey2index.zig");
+const pubkeys = @import("./pubkeys.zig");
 const config = @import("./config.zig");
 const beaconStateView = @import("./beaconStateView.zig");
 
@@ -10,7 +10,7 @@ comptime {
 
 pub fn deinit(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
     pool.deinit();
-    pubkey2index.deinit();
+    pubkeys.deinit();
     config.deinit();
 
     return env.getUndefined();
@@ -18,11 +18,11 @@ pub fn deinit(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
 
 fn register(env: napi.Env, exports: napi.Value) !void {
     try pool.init();
-    try pubkey2index.init();
+    try pubkeys.init();
     config.init();
 
     try pool.register(env, exports);
-    try pubkey2index.register(env, exports);
+    try pubkeys.register(env, exports);
     try config.register(env, exports);
     try beaconStateView.register(env, exports);
 

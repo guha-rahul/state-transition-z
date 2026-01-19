@@ -1,40 +1,68 @@
 import {config} from "@lodestar/config/default";
 import * as era from "@lodestar/era";
 import bindings from "../src/index.ts";
+import * as fs from "fs";
 
 console.log("loaded bindings");
 
-bindings.pool.ensureCapacity(10_000_000);
-bindings.index2pubkey.ensureCapacity(2_000_000);
+function printDuration<R>(label: string, fn: () => R): R {
+  console.time(label);
+  const result = fn();
+  console.timeEnd(label);
+  return result;
+}
 
-console.log("updated bindings capacity");
+async function printDurationAsync<R>(label: string, fn: () => Promise<R>): Promise<R> {
+  console.time(label);
+  const result = await fn();
+  console.timeEnd(label);
+  return result;
+}
 
-const reader = await era.era.EraReader.open(config, "./fixtures/era2/mainnet-01628-47ac89fb.era");
+const PKIX_FILE = "./mainnet.pkix";
+let hasPkix = printDuration("check for pkix file", () => {
+  try {
+    fs.accessSync(PKIX_FILE);
+    return true;
+  } catch {
+    return false;
+  }
+});
 
-console.log("loaded era reader");
+if (hasPkix) {
+  printDuration("load pkix from disk", () => bindings.pubkeys.load(PKIX_FILE));
+} else {
+  printDuration("update bindings capacity", () => {
+    bindings.pool.ensureCapacity(10_000_000);
+    bindings.pubkeys.ensureCapacity(2_000_000);
+  });
+}
 
-const stateBytes = await reader.readSerializedState();
+const reader = await printDurationAsync("load era reader", () =>
+  era.era.EraReader.open(config, "./fixtures/era/mainnet-01628-47ac89fb.era")
+);
 
-console.log("loaded state bytes");
+const stateBytes = await printDurationAsync("read serialized state", () => reader.readSerializedState());
 
-const state = bindings.BeaconStateView.createFromBytes("fulu", stateBytes);
+const state = printDuration("create state view",
+  () => bindings.BeaconStateView.createFromBytes("fulu", stateBytes)
+);
 
-console.log("loaded state view");
+printDuration("write pkix to disk", () => bindings.pubkeys.save(PKIX_FILE));
 
-console.log("slot:", state.slot);
-console.log("root:", state.root);
-console.log("epoch:", state.epoch);
-console.log("genesisTime:", state.genesisTime);
-console.log("genesisValidatorsRoot:", state.genesisValidatorsRoot);
-console.log("latestBlockHeader:", state.latestBlockHeader);
-console.log("previousJustifiedCheckpoint:", state.previousJustifiedCheckpoint);
-console.log("currentJustifiedCheckpoint:", state.currentJustifiedCheckpoint);
-console.log("finalizedCheckpoint:", state.finalizedCheckpoint);
-console.log("proposers:", state.proposers);
-console.log("proposersNextEpoch:", state.proposersNextEpoch);
-console.log("getBalance(0):", state.getBalance(0));
-console.log("getBalance(100):", state.getBalance(100));
-console.log("getFinalizedRootProof():", state.getFinalizedRootProof());
-console.log("isExecutionStateType():", state.isExecutionStateType());
-console.log("getEffectiveBalanceIncrementsZeroInactive() length:", state.getEffectiveBalanceIncrementsZeroInactive().length);
-console.log("computeUnrealizedCheckpoints():", state.computeUnrealizedCheckpoints());
+printDuration("get slot", () => state.slot);
+printDuration("get root", () => state.root);
+printDuration("get epoch", () => state.epoch);
+printDuration("get genesisTime", () => state.genesisTime);
+printDuration("get genesisValidatorsRoot", () => state.genesisValidatorsRoot);
+printDuration("get latestBlockHeader", () => state.latestBlockHeader);
+printDuration("get previousJustifiedCheckpoint", () => state.previousJustifiedCheckpoint);
+printDuration("get currentJustifiedCheckpoint", () => state.currentJustifiedCheckpoint);
+printDuration("proposers", () => state.proposers);
+printDuration("proposersNextEpoch", () => state.proposersNextEpoch);
+printDuration("getBalance(0)", () => state.getBalance(0));
+printDuration("getBalance(100)", () => state.getBalance(100));
+printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
+printDuration("isExecutionStateType()", () => state.isExecutionStateType());
+printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());
+printDuration("computeUnrealizedCheckpoints()", () => state.computeUnrealizedCheckpoints());

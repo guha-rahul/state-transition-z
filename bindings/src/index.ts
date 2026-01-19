@@ -46,13 +46,16 @@ type Bindings = {
   pool: {
     ensureCapacity: (capacity: number) => void;
   };
-  pubkey2index: {
+  pubkeys: {
+    load(filepath: string): void;
+    save(filepath: string): void;
     ensureCapacity: (capacity: number) => void;
-    get: (pubkey: Uint8Array) => number | undefined;
-  };
-  index2pubkey: {
-    ensureCapacity: (capacity: number) => void;
-    get: (index: number) => Uint8Array | undefined;
+    pubkey2index: {
+      get: (pubkey: Uint8Array) => number | undefined;
+    }
+    index2pubkey: {
+      get: (index: number) => Uint8Array | undefined;
+    };
   };
   config: {
     set: (chainConfig: object, genesisValidatorsRoot: Uint8Array) => void;
