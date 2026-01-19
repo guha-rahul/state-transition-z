@@ -2,7 +2,7 @@ const napi = @import("zapi:napi");
 const pool = @import("./pool.zig");
 const pubkeys = @import("./pubkeys.zig");
 const config = @import("./config.zig");
-const beaconStateView = @import("./beaconStateView.zig");
+const beaconStateView = @import("./beacon_state_view.zig");
 
 comptime {
     napi.module.register(register);
