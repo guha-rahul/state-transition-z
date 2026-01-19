@@ -103,9 +103,9 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
     ));
 
     const ensureCapacityValue = try env.createFunction(
-        "get",
+        "ensureCapacity",
         1,
-        index2pubkeyGet,
+        ensureCapacity,
         null,
     );
     try pubkey2index_obj.setNamedProperty("ensureCapacity", ensureCapacityValue);
