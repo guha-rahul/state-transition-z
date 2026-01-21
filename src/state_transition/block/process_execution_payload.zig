@@ -3,14 +3,15 @@ const Allocator = std.mem.Allocator;
 const CachedBeaconState = @import("../cache/state_cache.zig").CachedBeaconState;
 const types = @import("consensus_types");
 const preset = @import("preset").preset;
-const ForkSeq = @import("config").ForkSeq;
+const config = @import("config");
+const ForkSeq = config.ForkSeq;
 const SignedBlock = @import("../types/block.zig").SignedBlock;
 const Body = @import("../types/block.zig").Body;
 const ExecutionPayloadStatus = @import("../state_transition.zig").ExecutionPayloadStatus;
 const ExecutionPayloadHeader = @import("../types/execution_payload.zig").ExecutionPayloadHeader;
 const SignedBlindedBeaconBlock = @import("../types/beacon_block.zig").SignedBlindedBeaconBlock;
 const BlockExternalData = @import("../state_transition.zig").BlockExternalData;
-const BeaconConfig = @import("config").BeaconConfig;
+const BeaconConfig = config.BeaconConfig;
 const isMergeTransitionComplete = @import("../utils/execution.zig").isMergeTransitionComplete;
 const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
 const getRandaoMix = @import("../utils/seed.zig").getRandaoMix;
@@ -29,8 +30,8 @@ pub fn processExecutionPayload(
     external_data: BlockExternalData,
 ) !void {
     const state = cached_state.state;
+    const beacon_config = cached_state.config;
     const epoch_cache = cached_state.getEpochCache();
-    const config = epoch_cache.config;
     var partial_payload = PartialPayload{};
     switch (body) {
         .regular => |b| {
@@ -72,12 +73,12 @@ pub fn processExecutionPayload(
     // def compute_timestamp_at_slot(state: BeaconState, slot: Slot) -> uint64:
     //   slots_since_genesis = slot - GENESIS_SLOT
     //   return uint64(state.genesis_time + slots_since_genesis * SECONDS_PER_SLOT)
-    if (partial_payload.timestamp != (try state.genesisTime()) + (try state.slot()) * config.chain.SECONDS_PER_SLOT) {
+    if (partial_payload.timestamp != (try state.genesisTime() + try state.slot() * beacon_config.chain.SECONDS_PER_SLOT)) {
         return error.InvalidExecutionPayloadTimestamp;
     }
 
     if (state.forkSeq().gte(.deneb)) {
-        const max_blobs_per_block = config.getMaxBlobsPerBlock(computeEpochAtSlot(try state.slot()));
+        const max_blobs_per_block = beacon_config.getMaxBlobsPerBlock(computeEpochAtSlot(try state.slot()));
         if (body.blobKzgCommitmentsLen() > max_blobs_per_block) {
             return error.BlobKzgCommitmentsExceedsLimit;
         }
@@ -104,4 +105,38 @@ pub fn processExecutionPayload(
     defer payload_header.deinit(allocator);
 
     try state.setLatestExecutionPayloadHeader(&payload_header);
+}
+
+const BeaconBlock = @import("../types/beacon_block.zig").BeaconBlock;
+const Block = @import("../types/block.zig").Block;
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+const Node = @import("persistent_merkle_tree").Node;
+
+test "process execution payload - sanity" {
+    const allocator = std.testing.allocator;
+
+    var pool = try Node.Pool.init(allocator, 1024);
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
+    defer test_state.deinit();
+
+    var execution_payload: types.electra.ExecutionPayload.Type = types.electra.ExecutionPayload.default_value;
+    const beacon_config = test_state.cached_state.config;
+    execution_payload.timestamp = try test_state.cached_state.state.genesisTime() + try test_state.cached_state.state.slot() * beacon_config.chain.SECONDS_PER_SLOT;
+    var body: types.electra.BeaconBlockBody.Type = types.electra.BeaconBlockBody.default_value;
+    body.execution_payload = execution_payload;
+
+    var message: types.electra.BeaconBlock.Type = types.electra.BeaconBlock.default_value;
+    message.body = body;
+
+    const beacon_block = BeaconBlock{ .electra = &message };
+    const block = Block{ .regular = beacon_block };
+
+    try processExecutionPayload(
+        allocator,
+        test_state.cached_state,
+        block.beaconBlockBody(),
+        .{ .execution_payload_status = .valid, .data_availability_status = .available },
+    );
 }
