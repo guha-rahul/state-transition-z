@@ -1,6 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ForkSeq = @import("config").ForkSeq;
+const metrics = @import("metrics.zig");
+const observeEpochTransitionStep = metrics.observeEpochTransitionStep;
+const observeEpochTransition = metrics.observeEpochTransition;
+const readSeconds = metrics.readSeconds;
+const Timer = std.time.Timer;
 
 const types = @import("consensus_types");
 const preset = @import("preset").preset;
@@ -70,11 +75,12 @@ pub fn processSlots(
 
         const next_slot = try state.slot() + 1;
         if (next_slot % preset.SLOTS_PER_EPOCH == 0) {
-            // TODO(bing): metrics
-            // const epochTransitionTimer = metrics?.epochTransitionTime.startTimer();
+            var epoch_transition_timer = try Timer.start();
 
-            // TODO(bing): metrics: time beforeProcessEpoch
+            var timer = try Timer.start();
             var epoch_transition_cache = try EpochTransitionCache.init(allocator, post_state);
+            try observeEpochTransitionStep(.{ .step = .before_process_epoch }, timer.read());
+
             defer {
                 epoch_transition_cache.deinit();
                 allocator.destroy(epoch_transition_cache);
@@ -84,8 +90,9 @@ pub fn processSlots(
 
             try state.setSlot(next_slot);
 
+            timer = try Timer.start();
             try post_state.epoch_cache_ref.get().afterProcessEpoch(post_state, epoch_transition_cache);
-            // post_state.commit
+            try observeEpochTransitionStep(.{ .step = .after_process_epoch }, timer.read());
 
             const state_epoch = computeEpochAtSlot(next_slot);
 
@@ -110,11 +117,10 @@ pub fn processSlots(
             }
 
             try post_state.epoch_cache_ref.get().finalProcessEpoch(post_state);
+            metrics.state_transition.epoch_transition.observe(readSeconds(&epoch_transition_timer));
         } else {
             try state.setSlot(next_slot);
         }
-
-        //epochTransitionTimer
     }
 }
 
@@ -144,11 +150,7 @@ pub fn stateTransition(
         allocator.destroy(post_state);
     }
 
-    //TODO(bing): metrics
-    //if (metrics) {
-    //  onStateCloneMetrics(postState, metrics, StateCloneSource.stateTransition);
-    //}
-
+    try metrics.state_transition.onStateClone(post_state, .state_transition);
     try processSlots(allocator, post_state, block_slot, .{});
 
     // Verify proposer signature only
@@ -157,8 +159,7 @@ pub fn stateTransition(
     }
 
     //  // Note: time only on success
-    //  const processBlockTimer = metrics?.processBlockTime.startTimer();
-    //
+    var timer = try Timer.start();
     try processBlock(
         allocator,
         post_state,
@@ -169,26 +170,15 @@ pub fn stateTransition(
         },
         .{ .verify_signature = opts.verify_signatures },
     );
-    //
-    // TODO(bing): commit
-    //  const processBlockCommitTimer = metrics?.processBlockCommitTime.startTimer();
-    //  postState.commit();
-    //  processBlockCommitTimer?.();
+    metrics.state_transition.process_block.observe(readSeconds(&timer));
 
-    //  // Note: time only on success. Include processBlock and commit
-    //  processBlockTimer?.();
-    // TODO(bing): metrics
-    //  if (metrics) {
-    //    onPostStateMetrics(postState, metrics);
-    //  }
+    try metrics.state_transition.onPostState(post_state);
 
     // Verify state root
     if (opts.verify_state_root) {
-        //    const hashTreeRootTimer = metrics?.stateHashTreeRootTime.startTimer({
-        //      source: StateHashTreeRootSource.stateTransition,
-        //    });
+        timer = try Timer.start();
         const post_state_root = try post_state.state.hashTreeRoot();
-        //    hashTreeRootTimer?.();
+        try metrics.state_transition.state_hash_tree_root.observe(.{ .source = .block_transition }, readSeconds(&timer));
 
         const block_state_root = switch (block) {
             .regular => |b| b.stateRoot(),
