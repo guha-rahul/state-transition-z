@@ -18,6 +18,10 @@ interface Checkpoint {
   root: Uint8Array;
 }
 
+interface ProcessSlotsOpts {
+  dontTransferCache?: boolean;
+}
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -40,6 +44,7 @@ declare class BeaconStateView {
     justifiedCheckpoint: Checkpoint;
     finalizedCheckpoint: Checkpoint;
   };
+  processSlots(slot: number, options?: ProcessSlotsOpts): BeaconStateView;
 }
 
 type Bindings = {

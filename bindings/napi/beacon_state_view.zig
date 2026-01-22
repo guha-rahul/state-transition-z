@@ -9,6 +9,7 @@ const SignedBlock = state_transition.SignedBlock;
 const isExecutionEnabledFunc = state_transition.isExecutionEnabled;
 const computeUnrealizedCheckpoints = state_transition.computeUnrealizedCheckpoints;
 const getEffectiveBalanceIncrementsZeroInactiveFn = state_transition.getEffectiveBalanceIncrementsZeroInactive;
+const processSlotsFn = state_transition.state_transition.processSlots;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -227,6 +228,39 @@ pub fn BeaconStateView_computeUnrealizedCheckpoints(env: napi.Env, cb: napi.Call
     return obj;
 }
 
+/// Process slots from current state slot to target slot, returning a new BeaconStateView.
+///
+/// Arguments:
+/// - arg 0: target slot (number)
+/// - arg 1: options object (optional) with `dontTransferCache` boolean
+pub fn BeaconStateView_processSlots(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const slot: u64 = @intCast(try cb.arg(0).getValueInt64());
+
+    var dont_transfer_cache = false;
+    if (cb.getArg(1)) |options_arg| {
+        if (try options_arg.typeof() == .object and try options_arg.hasNamedProperty("dontTransferCache")) {
+            dont_transfer_cache = try (try options_arg.getNamedProperty("dontTransferCache")).getValueBool();
+        }
+    }
+
+    const post_state = try cached_state.clone(allocator, .{ .transfer_cache = !dont_transfer_cache });
+    errdefer {
+        post_state.deinit();
+        allocator.destroy(post_state);
+    }
+
+    try processSlotsFn(allocator, post_state, slot, .{});
+
+    const ctor = try cb.this().getNamedProperty("constructor");
+    const new_state_value = try env.newInstance(ctor, .{});
+    const dummy_state = try env.unwrap(CachedBeaconState, new_state_value);
+    dummy_state.* = post_state.*;
+    allocator.destroy(post_state);
+
+    return new_state_value;
+}
+
 pub fn register(env: napi.Env, exports: napi.Value) !void {
     const beacon_state_view_ctor = try env.defineClass(
         "BeaconStateView",
@@ -251,8 +285,10 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },
             .{ .utf8name = "getFinalizedRootProof", .method = napi.wrapCallback(0, BeaconStateView_getFinalizedRootProof) },
             .{ .utf8name = "computeUnrealizedCheckpoints", .method = napi.wrapCallback(0, BeaconStateView_computeUnrealizedCheckpoints) },
+            .{ .utf8name = "processSlots", .method = napi.wrapCallback(1, BeaconStateView_processSlots) },
         },
     );
+
     // Static method on constructor
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
         .utf8name = "createFromBytes",
