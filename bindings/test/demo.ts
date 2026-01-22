@@ -63,4 +63,5 @@ printDuration("getBalance(100)", () => state.getBalance(100));
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());
+printDuration("computeUnrealizedCheckpoints()", () => state.computeUnrealizedCheckpoints());
 printDuration("processSlots", () => state.processSlots(state.slot+1));

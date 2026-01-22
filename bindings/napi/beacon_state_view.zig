@@ -288,7 +288,6 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "processSlots", .method = napi.wrapCallback(1, BeaconStateView_processSlots) },
         },
     );
-
     // Static method on constructor
     try beacon_state_view_ctor.defineProperties(&[_]napi.c.napi_property_descriptor{.{
         .utf8name = "createFromBytes",
