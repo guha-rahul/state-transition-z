@@ -228,6 +228,32 @@ pub fn BeaconStateView_computeUnrealizedCheckpoints(env: napi.Env, cb: napi.Call
     return obj;
 }
 
+/// Get a validator by index.
+pub fn BeaconStateView_getValidator(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const index: u64 = @intCast(try cb.arg(0).getValueInt64());
+
+    var validators = try cached_state.state.validators();
+    var validator_view = try validators.get(index);
+    var validator: ct.phase0.Validator.Type = undefined;
+    try validator_view.toValue(allocator, &validator);
+
+    const obj = try env.createObject();
+    // pubkey is 48 bytes, create Uint8Array directly
+    var pubkey_bytes: [*]u8 = undefined;
+    const pubkey_buf = try env.createArrayBuffer(48, &pubkey_bytes);
+    @memcpy(pubkey_bytes[0..48], &validator.pubkey);
+    try obj.setNamedProperty("pubkey", try env.createTypedarray(.uint8, 48, pubkey_buf, 0));
+    try obj.setNamedProperty("withdrawalCredentials", try sszValueToNapiValue(env, ct.primitive.Bytes32, &validator.withdrawal_credentials));
+    try obj.setNamedProperty("effectiveBalance", try env.createBigintUint64(validator.effective_balance));
+    try obj.setNamedProperty("slashed", try env.getBoolean(validator.slashed));
+    try obj.setNamedProperty("activationEligibilityEpoch", try env.createBigintUint64(validator.activation_eligibility_epoch));
+    try obj.setNamedProperty("activationEpoch", try env.createBigintUint64(validator.activation_epoch));
+    try obj.setNamedProperty("exitEpoch", try env.createBigintUint64(validator.exit_epoch));
+    try obj.setNamedProperty("withdrawableEpoch", try env.createBigintUint64(validator.withdrawable_epoch));
+    return obj;
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -302,6 +328,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "proposers", .getter = napi.wrapCallback(0, BeaconStateView_proposers) },
             .{ .utf8name = "proposersNextEpoch", .getter = napi.wrapCallback(0, BeaconStateView_proposersNextEpoch) },
             .{ .utf8name = "getBalance", .method = napi.wrapCallback(1, BeaconStateView_getBalance) },
+            .{ .utf8name = "getValidator", .method = napi.wrapCallback(1, BeaconStateView_getValidator) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

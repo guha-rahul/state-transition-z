@@ -60,6 +60,7 @@ printDuration("proposers", () => state.proposers);
 printDuration("proposersNextEpoch", () => state.proposersNextEpoch);
 printDuration("getBalance(0)", () => state.getBalance(0));
 printDuration("getBalance(100)", () => state.getBalance(100));
+printDuration("getValidator(0)", () => state.getValidator(0));
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());

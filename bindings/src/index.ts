@@ -28,6 +28,17 @@ interface ProposerRewards {
   slashing: bigint;
 }
 
+interface Validator {
+  pubkey: Uint8Array;
+  withdrawalCredentials: Uint8Array;
+  effectiveBalance: bigint;
+  slashed: boolean;
+  activationEligibilityEpoch: bigint;
+  activationEpoch: bigint;
+  exitEpoch: bigint;
+  withdrawableEpoch: bigint;
+}
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -43,6 +54,7 @@ declare class BeaconStateView {
   proposersNextEpoch: number[] | null;
   proposerRewards: ProposerRewards;
   getBalance(index: number): bigint;
+  getValidator(index: number): Validator;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
