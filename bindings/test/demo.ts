@@ -76,6 +76,7 @@ printDuration("isMergeTransitionComplete()", () => state.isMergeTransitionComple
 printDuration("getRandaoMix(state.epoch)", () => state.getRandaoMix(state.epoch));
 printDuration("getHistoricalSummaries()", () => state.getHistoricalSummaries());
 printDuration("getPendingDeposits()", () => state.getPendingDeposits());
+printDuration("getPendingPartialWithdrawals()", () => state.getPendingPartialWithdrawals());
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());

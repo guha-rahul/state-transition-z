@@ -45,6 +45,12 @@ interface PendingDeposit {
   slot: bigint;
 }
 
+interface PendingPartialWithdrawal {
+  validatorIndex: number;
+  amount: bigint;
+  withdrawableEpoch: bigint;
+}
+
 interface Validator {
   pubkey: Uint8Array;
   withdrawalCredentials: Uint8Array;
@@ -97,6 +103,7 @@ declare class BeaconStateView {
   getRandaoMix(epoch: number): Uint8Array;
   getHistoricalSummaries(): HistoricalSummary[];
   getPendingDeposits(): PendingDeposit[];
+  getPendingPartialWithdrawals(): PendingPartialWithdrawal[];
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
