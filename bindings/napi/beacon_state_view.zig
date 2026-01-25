@@ -424,6 +424,35 @@ pub fn BeaconStateView_getRandaoMix(env: napi.Env, cb: napi.CallbackInfo(1)) !na
     return sszValueToNapiValue(env, ct.primitive.Bytes32, mix);
 }
 
+/// Get the historical summaries from the state (Capella+).
+/// Returns: array of {blockSummaryRoot: Uint8Array, stateSummaryRoot: Uint8Array}
+pub fn BeaconStateView_getHistoricalSummaries(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var historical_summaries = cached_state.state.historicalSummaries() catch {
+        try env.throwError("STATE_ERROR", "Failed to get historicalSummaries");
+        return env.getNull();
+    };
+
+    const len = historical_summaries.length() catch {
+        try env.throwError("STATE_ERROR", "Failed to get historicalSummaries length");
+        return env.getNull();
+    };
+
+    const result = try env.createArray();
+    for (0..len) |i| {
+        var summary = historical_summaries.get(@intCast(i)) catch continue;
+        const obj = try env.createObject();
+        const block_root = summary.getRoot("block_summary_root") catch continue;
+        const state_root = summary.getRoot("state_summary_root") catch continue;
+        try obj.setNamedProperty("blockSummaryRoot", try sszValueToNapiValue(env, ct.primitive.Root, block_root));
+        try obj.setNamedProperty("stateSummaryRoot", try sszValueToNapiValue(env, ct.primitive.Root, state_root));
+        try result.setElement(@intCast(i), obj);
+    }
+
+    return result;
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -511,6 +540,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getBlockRoot", .method = napi.wrapCallback(1, BeaconStateView_getBlockRoot) },
             .{ .utf8name = "isMergeTransitionComplete", .method = napi.wrapCallback(0, BeaconStateView_isMergeTransitionComplete) },
             .{ .utf8name = "getRandaoMix", .method = napi.wrapCallback(1, BeaconStateView_getRandaoMix) },
+            .{ .utf8name = "getHistoricalSummaries", .method = napi.wrapCallback(0, BeaconStateView_getHistoricalSummaries) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

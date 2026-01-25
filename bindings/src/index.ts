@@ -32,6 +32,11 @@ interface SyncCommitteeCache {
   validatorIndices: number[];
 }
 
+interface HistoricalSummary {
+  blockSummaryRoot: Uint8Array;
+  stateSummaryRoot: Uint8Array;
+}
+
 interface Validator {
   pubkey: Uint8Array;
   withdrawalCredentials: Uint8Array;
@@ -82,6 +87,7 @@ declare class BeaconStateView {
   getBlockRoot(epoch: number): Uint8Array;
   isMergeTransitionComplete(): boolean;
   getRandaoMix(epoch: number): Uint8Array;
+  getHistoricalSummaries(): HistoricalSummary[];
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
