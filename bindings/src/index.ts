@@ -37,6 +37,14 @@ interface HistoricalSummary {
   stateSummaryRoot: Uint8Array;
 }
 
+interface PendingDeposit {
+  pubkey: Uint8Array;
+  withdrawalCredentials: Uint8Array;
+  amount: bigint;
+  signature: Uint8Array;
+  slot: bigint;
+}
+
 interface Validator {
   pubkey: Uint8Array;
   withdrawalCredentials: Uint8Array;
@@ -88,6 +96,7 @@ declare class BeaconStateView {
   isMergeTransitionComplete(): boolean;
   getRandaoMix(epoch: number): Uint8Array;
   getHistoricalSummaries(): HistoricalSummary[];
+  getPendingDeposits(): PendingDeposit[];
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;

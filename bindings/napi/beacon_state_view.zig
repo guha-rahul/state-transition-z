@@ -452,6 +452,36 @@ pub fn BeaconStateView_getHistoricalSummaries(env: napi.Env, cb: napi.CallbackIn
     return result;
 }
 
+/// Get the pending deposits from the state (Electra+).
+/// Returns: array of {pubkey, withdrawalCredentials, amount, signature, slot}
+pub fn BeaconStateView_getPendingDeposits(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var pending_deposits = cached_state.state.pendingDeposits() catch {
+        try env.throwError("STATE_ERROR", "Failed to get pendingDeposits");
+        return env.getNull();
+    };
+
+    const deposits = pending_deposits.getAllReadonlyValues(allocator) catch {
+        try env.throwError("STATE_ERROR", "Failed to get pendingDeposits values");
+        return env.getNull();
+    };
+    defer allocator.free(deposits);
+
+    const result = try env.createArray();
+    for (deposits, 0..) |deposit, i| {
+        const obj = try env.createObject();
+        try obj.setNamedProperty("pubkey", try sszValueToNapiValue(env, ct.primitive.BLSPubkey, &deposit.pubkey));
+        try obj.setNamedProperty("withdrawalCredentials", try sszValueToNapiValue(env, ct.primitive.Bytes32, &deposit.withdrawal_credentials));
+        try obj.setNamedProperty("amount", try env.createBigintUint64(deposit.amount));
+        try obj.setNamedProperty("signature", try sszValueToNapiValue(env, ct.primitive.BLSSignature, &deposit.signature));
+        try obj.setNamedProperty("slot", try env.createBigintUint64(deposit.slot));
+        try result.setElement(@intCast(i), obj);
+    }
+
+    return result;
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -540,6 +570,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "isMergeTransitionComplete", .method = napi.wrapCallback(0, BeaconStateView_isMergeTransitionComplete) },
             .{ .utf8name = "getRandaoMix", .method = napi.wrapCallback(1, BeaconStateView_getRandaoMix) },
             .{ .utf8name = "getHistoricalSummaries", .method = napi.wrapCallback(0, BeaconStateView_getHistoricalSummaries) },
+            .{ .utf8name = "getPendingDeposits", .method = napi.wrapCallback(0, BeaconStateView_getPendingDeposits) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

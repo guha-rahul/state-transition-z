@@ -75,6 +75,7 @@ printDuration("getBlockRoot(state.epoch - 1)", () => state.getBlockRoot(state.ep
 printDuration("isMergeTransitionComplete()", () => state.isMergeTransitionComplete());
 printDuration("getRandaoMix(state.epoch)", () => state.getRandaoMix(state.epoch));
 printDuration("getHistoricalSummaries()", () => state.getHistoricalSummaries());
+printDuration("getPendingDeposits()", () => state.getPendingDeposits());
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());
