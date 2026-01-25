@@ -12,6 +12,7 @@ const getEffectiveBalanceIncrementsZeroInactiveFn = state_transition.getEffectiv
 const processSlotsFn = state_transition.state_transition.processSlots;
 const ValidatorStatus = state_transition.ValidatorStatus;
 const getValidatorStatus = state_transition.getValidatorStatus;
+const getBlockRootAtSlot = state_transition.getBlockRootAtSlot;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -354,6 +355,27 @@ pub fn BeaconStateView_getIndexedSyncCommitteeAtEpoch(env: napi.Env, cb: napi.Ca
     return obj;
 }
 
+/// Get the block root at a given slot.
+/// Arguments:
+/// - arg 0: slot (number)
+/// Returns: Root (Uint8Array)
+pub fn BeaconStateView_getBlockRootAtSlot(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const slot: u64 = @intCast(try cb.arg(0).getValueInt64());
+
+    const root = getBlockRootAtSlot(cached_state.state, slot) catch |err| {
+        const msg = switch (err) {
+            error.SlotTooBig => "Can only get block root in the past",
+            error.SlotTooSmall => "Cannot get block root more than SLOTS_PER_HISTORICAL_ROOT in the past",
+            else => "Failed to get block root",
+        };
+        try env.throwError("INVALID_SLOT", msg);
+        return env.getNull();
+    };
+
+    return sszValueToNapiValue(env, ct.primitive.Root, root);
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -437,6 +459,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getBeaconProposersPrevEpoch", .method = napi.wrapCallback(0, BeaconStateView_getBeaconProposersPrevEpoch) },
             .{ .utf8name = "getBeaconProposersNextEpoch", .method = napi.wrapCallback(0, BeaconStateView_getBeaconProposersNextEpoch) },
             .{ .utf8name = "getIndexedSyncCommitteeAtEpoch", .method = napi.wrapCallback(1, BeaconStateView_getIndexedSyncCommitteeAtEpoch) },
+            .{ .utf8name = "getBlockRootAtSlot", .method = napi.wrapCallback(1, BeaconStateView_getBlockRootAtSlot) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

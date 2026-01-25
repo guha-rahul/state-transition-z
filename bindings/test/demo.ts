@@ -70,6 +70,7 @@ printDuration("getBeaconProposers()", () => state.getBeaconProposers());
 printDuration("getBeaconProposersPrevEpoch()", () => state.getBeaconProposersPrevEpoch());
 printDuration("getBeaconProposersNextEpoch()", () => state.getBeaconProposersNextEpoch());
 printDuration("getIndexedSyncCommitteeAtEpoch(state.epoch)", () => state.getIndexedSyncCommitteeAtEpoch(state.epoch));
+printDuration("getBlockRootAtSlot(state.slot - 1)", () => state.getBlockRootAtSlot(state.slot - 1));
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());

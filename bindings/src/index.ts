@@ -78,6 +78,7 @@ declare class BeaconStateView {
   getBeaconProposersPrevEpoch(): number[] | null;
   getBeaconProposersNextEpoch(): number[] | null;
   getIndexedSyncCommitteeAtEpoch(epoch: number): SyncCommitteeCache;
+  getBlockRootAtSlot(slot: number): Uint8Array;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
