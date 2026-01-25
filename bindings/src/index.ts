@@ -39,6 +39,17 @@ interface Validator {
   withdrawableEpoch: bigint;
 }
 
+type ValidatorStatus =
+  | "pending_initialized"
+  | "pending_queued"
+  | "active_ongoing"
+  | "active_exiting"
+  | "active_slashed"
+  | "exited_unslashed"
+  | "exited_slashed"
+  | "withdrawal_possible"
+  | "withdrawal_done";
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -55,6 +66,7 @@ declare class BeaconStateView {
   proposerRewards: ProposerRewards;
   getBalance(index: number): bigint;
   getValidator(index: number): Validator;
+  getValidatorStatus(index: number): ValidatorStatus;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;

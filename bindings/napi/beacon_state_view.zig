@@ -10,6 +10,8 @@ const isExecutionEnabledFunc = state_transition.isExecutionEnabled;
 const computeUnrealizedCheckpoints = state_transition.computeUnrealizedCheckpoints;
 const getEffectiveBalanceIncrementsZeroInactiveFn = state_transition.getEffectiveBalanceIncrementsZeroInactive;
 const processSlotsFn = state_transition.state_transition.processSlots;
+const ValidatorStatus = state_transition.ValidatorStatus;
+const getValidatorStatus = state_transition.getValidatorStatus;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -254,6 +256,24 @@ pub fn BeaconStateView_getValidator(env: napi.Env, cb: napi.CallbackInfo(1)) !na
     return obj;
 }
 
+/// Get the status of a validator by index.
+/// Arguments:
+/// - arg 0: validator index (number)
+/// Returns: status string
+pub fn BeaconStateView_getValidatorStatus(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const index: u64 = @intCast(try cb.arg(0).getValueInt64());
+    const current_epoch = cached_state.getEpochCache().epoch;
+
+    var validators = try cached_state.state.validators();
+    var validator_view = try validators.get(index);
+    var validator: ct.phase0.Validator.Type = undefined;
+    try validator_view.toValue(allocator, &validator);
+
+    const status = getValidatorStatus(&validator, current_epoch);
+    return try env.createStringUtf8(status.toString());
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -329,6 +349,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "proposersNextEpoch", .getter = napi.wrapCallback(0, BeaconStateView_proposersNextEpoch) },
             .{ .utf8name = "getBalance", .method = napi.wrapCallback(1, BeaconStateView_getBalance) },
             .{ .utf8name = "getValidator", .method = napi.wrapCallback(1, BeaconStateView_getValidator) },
+            .{ .utf8name = "getValidatorStatus", .method = napi.wrapCallback(1, BeaconStateView_getValidatorStatus) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },
