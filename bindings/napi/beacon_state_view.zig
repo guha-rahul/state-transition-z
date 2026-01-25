@@ -282,6 +282,14 @@ pub fn BeaconStateView_getValidatorCount(env: napi.Env, cb: napi.CallbackInfo(0)
     return try env.createInt64(@intCast(count));
 }
 
+/// Get the number of active validators at the current epoch.
+pub fn BeaconStateView_getActiveValidatorCount(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const epoch_cache = cached_state.getEpochCache();
+    const count = epoch_cache.current_shuffling.get().active_indices.len;
+    return try env.createInt64(@intCast(count));
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -359,6 +367,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getValidator", .method = napi.wrapCallback(1, BeaconStateView_getValidator) },
             .{ .utf8name = "getValidatorStatus", .method = napi.wrapCallback(1, BeaconStateView_getValidatorStatus) },
             .{ .utf8name = "validatorCount", .getter = napi.wrapCallback(0, BeaconStateView_getValidatorCount) },
+            .{ .utf8name = "activeValidatorCount", .getter = napi.wrapCallback(0, BeaconStateView_getActiveValidatorCount) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

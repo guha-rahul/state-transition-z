@@ -68,6 +68,7 @@ declare class BeaconStateView {
   getValidator(index: number): Validator;
   getValidatorStatus(index: number): ValidatorStatus;
   validatorCount: number;
+  activeValidatorCount: number;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
