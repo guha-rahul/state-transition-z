@@ -14,6 +14,7 @@ const ValidatorStatus = state_transition.ValidatorStatus;
 const getValidatorStatus = state_transition.getValidatorStatus;
 const getBlockRootAtSlot = state_transition.getBlockRootAtSlot;
 const computeStartSlotAtEpoch = state_transition.computeStartSlotAtEpoch;
+const isMergeTransitionComplete = state_transition.isMergeTransitionComplete;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -399,6 +400,13 @@ pub fn BeaconStateView_getBlockRoot(env: napi.Env, cb: napi.CallbackInfo(1)) !na
     return sszValueToNapiValue(env, ct.primitive.Root, root);
 }
 
+/// Check if the merge transition is complete.
+/// Returns: boolean
+pub fn BeaconStateView_isMergeTransitionComplete(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    return env.getBoolean(isMergeTransitionComplete(cached_state.state));
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -484,6 +492,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getIndexedSyncCommitteeAtEpoch", .method = napi.wrapCallback(1, BeaconStateView_getIndexedSyncCommitteeAtEpoch) },
             .{ .utf8name = "getBlockRootAtSlot", .method = napi.wrapCallback(1, BeaconStateView_getBlockRootAtSlot) },
             .{ .utf8name = "getBlockRoot", .method = napi.wrapCallback(1, BeaconStateView_getBlockRoot) },
+            .{ .utf8name = "isMergeTransitionComplete", .method = napi.wrapCallback(0, BeaconStateView_isMergeTransitionComplete) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },

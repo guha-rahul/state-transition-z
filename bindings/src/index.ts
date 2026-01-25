@@ -80,6 +80,7 @@ declare class BeaconStateView {
   getIndexedSyncCommitteeAtEpoch(epoch: number): SyncCommitteeCache;
   getBlockRootAtSlot(slot: number): Uint8Array;
   getBlockRoot(epoch: number): Uint8Array;
+  isMergeTransitionComplete(): boolean;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
