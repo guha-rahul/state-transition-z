@@ -66,6 +66,13 @@ printDuration("clonedCountWithTransferCache", () => state.clonedCountWithTransfe
 printDuration("createdWithTransferCache", () => state.createdWithTransferCache);
 printDuration("serializeValidators", () => state.serializeValidators());
 printDuration("serializedValidatorsSize", () => state.serializedValidatorsSize());
+printDuration("serializeValidatorsToBytes", () => {
+  const size = state.serializedValidatorsSize();
+  const output = new Uint8Array(size);
+  const bytesWritten = state.serializeValidatorsToBytes(output, 0);
+  console.log(`  wrote ${bytesWritten} bytes`);
+  return output;
+});
 printDuration("getBalance(0)", () => state.getBalance(0));
 printDuration("getBalance(100)", () => state.getBalance(100));
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());

@@ -39,6 +39,7 @@ declare class BeaconStateView {
   pendingConsolidationsLength: number;
   serializeValidators(): Uint8Array;
   serializedValidatorsSize(): number;
+  serializeValidatorsToBytes(output: Uint8Array, offset: number): number;
   getBalance(index: number): bigint;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;

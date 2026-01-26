@@ -203,6 +203,26 @@ pub fn BeaconStateView_serializedValidatorsSize(env: napi.Env, cb: napi.Callback
     return try env.createInt64(@intCast(size));
 }
 
+pub fn BeaconStateView_serializeValidatorsToBytes(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    // arg 0: output
+    const output_info = try cb.arg(0).getTypedarrayInfo();
+    if (output_info.array_type != .uint8) {
+        return error.InvalidOutputBufferType;
+    }
+
+    // arg 1: offset
+    const offset = try cb.arg(1).getValueUint32();
+    if (offset > output_info.length) {
+        return error.InvalidOffset;
+    }
+
+    var validators_view = try cached_state.state.validators();
+    const output_slice = output_info.data[offset..];
+    const bytes_written = try validators_view.serializeIntoBytes(output_slice);
+    return try env.createInt64(@intCast(bytes_written));
+}
 pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
     const index: u64 = @intCast(try cb.arg(0).getValueInt64());
@@ -305,6 +325,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "pendingConsolidationsLength", .getter = napi.wrapCallback(0, BeaconStateView_pendingConsolidationsLength) },
             .{ .utf8name = "serializeValidators", .method = napi.wrapCallback(0, BeaconStateView_serializeValidators) },
             .{ .utf8name = "serializedValidatorsSize", .method = napi.wrapCallback(0, BeaconStateView_serializedValidatorsSize) },
+            .{ .utf8name = "serializeValidatorsToBytes", .method = napi.wrapCallback(2, BeaconStateView_serializeValidatorsToBytes) },
             .{ .utf8name = "getBalance", .method = napi.wrapCallback(1, BeaconStateView_getBalance) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
