@@ -112,6 +112,7 @@ declare class BeaconStateView {
   getPendingConsolidations(): PendingConsolidation[];
   getProposerLookahead(): Uint32Array;
   getSingleProof(gindex: number): Uint8Array[];
+  isValidVoluntaryExit(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): boolean;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;

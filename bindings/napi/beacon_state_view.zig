@@ -16,6 +16,7 @@ const getBlockRootAtSlot = state_transition.getBlockRootAtSlot;
 const computeStartSlotAtEpoch = state_transition.computeStartSlotAtEpoch;
 const isMergeTransitionComplete = state_transition.isMergeTransitionComplete;
 const getRandaoMix = state_transition.getRandaoMix;
+const isValidVoluntaryExitFn = state_transition.isValidVoluntaryExit;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -568,6 +569,27 @@ pub fn BeaconStateView_getSingleProof(env: napi.Env, cb: napi.CallbackInfo(1)) !
     return result;
 }
 
+/// Check if a signed voluntary exit is valid.
+pub fn BeaconStateView_isValidVoluntaryExit(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const verify_signature = try cb.arg(1).getValueBool();
+
+    const bytes_info = try cb.arg(0).getTypedarrayInfo();
+
+    var signed_voluntary_exit: ct.phase0.SignedVoluntaryExit.Type = ct.phase0.SignedVoluntaryExit.default_value;
+    ct.phase0.SignedVoluntaryExit.deserializeFromBytes(bytes_info.data, &signed_voluntary_exit) catch {
+        try env.throwError("DESERIALIZE_ERROR", "Failed to deserialize SignedVoluntaryExit");
+        return env.getNull();
+    };
+
+    const is_valid = isValidVoluntaryExitFn(cached_state, &signed_voluntary_exit, verify_signature) catch {
+        try env.throwError("VALIDATION_ERROR", "Failed to validate voluntary exit");
+        return env.getNull();
+    };
+
+    return env.getBoolean(is_valid);
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -661,6 +683,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getPendingConsolidations", .method = napi.wrapCallback(0, BeaconStateView_getPendingConsolidations) },
             .{ .utf8name = "getProposerLookahead", .method = napi.wrapCallback(0, BeaconStateView_getProposerLookahead) },
             .{ .utf8name = "getSingleProof", .method = napi.wrapCallback(1, BeaconStateView_getSingleProof) },
+            .{ .utf8name = "isValidVoluntaryExit", .method = napi.wrapCallback(2, BeaconStateView_isValidVoluntaryExit) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },
