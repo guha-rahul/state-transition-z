@@ -65,6 +65,7 @@ printDuration("clonedCount", () => state.clonedCount);
 printDuration("clonedCountWithTransferCache", () => state.clonedCountWithTransferCache);
 printDuration("createdWithTransferCache", () => state.createdWithTransferCache);
 printDuration("serializeValidators", () => state.serializeValidators());
+printDuration("serializedValidatorsSize", () => state.serializedValidatorsSize());
 printDuration("getBalance(0)", () => state.getBalance(0));
 printDuration("getBalance(100)", () => state.getBalance(100));
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
