@@ -107,8 +107,8 @@ declare class BeaconStateView {
   isMergeTransitionComplete(): boolean;
   getRandaoMix(epoch: number): Uint8Array;
   getHistoricalSummaries(): HistoricalSummary[];
-  getPendingDeposits(): PendingDeposit[];
-  getPendingPartialWithdrawals(): PendingPartialWithdrawal[];
+  getPendingDeposits(): Uint8Array;
+  getPendingPartialWithdrawals(): Uint8Array;
   getPendingConsolidations(): PendingConsolidation[];
   getProposerLookahead(): Uint32Array;
   getSingleProof(gindex: number): Uint8Array[];

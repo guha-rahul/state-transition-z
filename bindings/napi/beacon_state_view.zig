@@ -453,7 +453,7 @@ pub fn BeaconStateView_getHistoricalSummaries(env: napi.Env, cb: napi.CallbackIn
 }
 
 /// Get the pending deposits from the state (Electra+).
-/// Returns: array of {pubkey, withdrawalCredentials, amount, signature, slot}
+/// Returns: Uint8Array of SSZ serialized PendingDeposits list
 pub fn BeaconStateView_getPendingDeposits(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
@@ -462,27 +462,23 @@ pub fn BeaconStateView_getPendingDeposits(env: napi.Env, cb: napi.CallbackInfo(0
         return env.getNull();
     };
 
-    const deposits = pending_deposits.getAllReadonlyValues(allocator) catch {
-        try env.throwError("STATE_ERROR", "Failed to get pendingDeposits values");
+    const size = pending_deposits.serializedSize() catch {
+        try env.throwError("STATE_ERROR", "Failed to get pendingDeposits size");
         return env.getNull();
     };
-    defer allocator.free(deposits);
 
-    const result = try env.createArray();
-    for (deposits, 0..) |deposit, i| {
-        const obj = try env.createObject();
-        try obj.setNamedProperty("pubkey", try sszValueToNapiValue(env, ct.primitive.BLSPubkey, &deposit.pubkey));
-        try obj.setNamedProperty("withdrawalCredentials", try sszValueToNapiValue(env, ct.primitive.Bytes32, &deposit.withdrawal_credentials));
-        try obj.setNamedProperty("amount", try env.createBigintUint64(deposit.amount));
-        try obj.setNamedProperty("signature", try sszValueToNapiValue(env, ct.primitive.BLSSignature, &deposit.signature));
-        try obj.setNamedProperty("slot", try env.createBigintUint64(deposit.slot));
-        try result.setElement(@intCast(i), obj);
-    }
+    var bytes: [*]u8 = undefined;
+    const buf = try env.createArrayBuffer(size, &bytes);
+    _ = pending_deposits.serializeIntoBytes(bytes[0..size]) catch {
+        try env.throwError("STATE_ERROR", "Failed to serialize pendingDeposits");
+        return env.getNull();
+    };
 
-    return result;
+    return try env.createTypedarray(.uint8, size, buf, 0);
 }
 
 /// Get the pending partial withdrawals from the state (Electra+).
+/// Returns: Uint8Array of SSZ serialized PendingPartialWithdrawals list
 pub fn BeaconStateView_getPendingPartialWithdrawals(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
@@ -491,22 +487,19 @@ pub fn BeaconStateView_getPendingPartialWithdrawals(env: napi.Env, cb: napi.Call
         return env.getNull();
     };
 
-    const withdrawals = pending_partial_withdrawals.getAllReadonlyValues(allocator) catch {
-        try env.throwError("STATE_ERROR", "Failed to get pendingPartialWithdrawals values");
+    const size = pending_partial_withdrawals.serializedSize() catch {
+        try env.throwError("STATE_ERROR", "Failed to get pendingPartialWithdrawals size");
         return env.getNull();
     };
-    defer allocator.free(withdrawals);
 
-    const result = try env.createArray();
-    for (withdrawals, 0..) |withdrawal, i| {
-        const obj = try env.createObject();
-        try obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(withdrawal.validator_index)));
-        try obj.setNamedProperty("amount", try env.createBigintUint64(withdrawal.amount));
-        try obj.setNamedProperty("withdrawableEpoch", try env.createBigintUint64(withdrawal.withdrawable_epoch));
-        try result.setElement(@intCast(i), obj);
-    }
+    var bytes: [*]u8 = undefined;
+    const buf = try env.createArrayBuffer(size, &bytes);
+    _ = pending_partial_withdrawals.serializeIntoBytes(bytes[0..size]) catch {
+        try env.throwError("STATE_ERROR", "Failed to serialize pendingPartialWithdrawals");
+        return env.getNull();
+    };
 
-    return result;
+    return try env.createTypedarray(.uint8, size, buf, 0);
 }
 
 /// Get the pending consolidations from the state
