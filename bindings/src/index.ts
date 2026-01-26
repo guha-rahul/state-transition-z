@@ -78,6 +78,15 @@ type ValidatorStatus =
   | "withdrawal_possible"
   | "withdrawal_done";
 
+type VoluntaryExitValidity =
+  | "valid"
+  | "inactive"
+  | "already_exited"
+  | "early_epoch"
+  | "short_time_active"
+  | "pending_withdrawals"
+  | "invalid_signature";
+
 declare class BeaconStateView {
   static createFromBytes(fork: string, bytes: Uint8Array): BeaconStateView;
   slot: number;
@@ -113,6 +122,7 @@ declare class BeaconStateView {
   getProposerLookahead(): Uint32Array;
   getSingleProof(gindex: number): Uint8Array[];
   isValidVoluntaryExit(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): boolean;
+  getVoluntaryExitValidity(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): VoluntaryExitValidity;
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
   isExecutionStateType(): boolean;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;

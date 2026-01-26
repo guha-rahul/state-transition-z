@@ -17,6 +17,8 @@ const computeStartSlotAtEpoch = state_transition.computeStartSlotAtEpoch;
 const isMergeTransitionComplete = state_transition.isMergeTransitionComplete;
 const getRandaoMix = state_transition.getRandaoMix;
 const isValidVoluntaryExitFn = state_transition.isValidVoluntaryExit;
+const getVoluntaryExitValidityFn = state_transition.getVoluntaryExitValidity;
+const VoluntaryExitValidity = state_transition.VoluntaryExitValidity;
 const preset = @import("preset").preset;
 const ct = @import("consensus_types");
 const pool = @import("./pool.zig");
@@ -590,6 +592,37 @@ pub fn BeaconStateView_isValidVoluntaryExit(env: napi.Env, cb: napi.CallbackInfo
     return env.getBoolean(is_valid);
 }
 
+/// Get the validity status of a signed voluntary exit.
+pub fn BeaconStateView_getVoluntaryExitValidity(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const verify_signature = try cb.arg(1).getValueBool();
+
+    const bytes_info = try cb.arg(0).getTypedarrayInfo();
+
+    var signed_voluntary_exit: ct.phase0.SignedVoluntaryExit.Type = ct.phase0.SignedVoluntaryExit.default_value;
+    ct.phase0.SignedVoluntaryExit.deserializeFromBytes(bytes_info.data, &signed_voluntary_exit) catch {
+        try env.throwError("DESERIALIZE_ERROR", "Failed to deserialize SignedVoluntaryExit");
+        return env.getNull();
+    };
+
+    const validity = getVoluntaryExitValidityFn(cached_state, &signed_voluntary_exit, verify_signature) catch {
+        try env.throwError("VALIDATION_ERROR", "Failed to get voluntary exit validity");
+        return env.getNull();
+    };
+
+    const validity_str = switch (validity) {
+        .valid => "valid",
+        .inactive => "inactive",
+        .already_exited => "already_exited",
+        .early_epoch => "early_epoch",
+        .short_time_active => "short_time_active",
+        .pending_withdrawals => "pending_withdrawals",
+        .invalid_signature => "invalid_signature",
+    };
+
+    return env.createStringUtf8(validity_str);
+}
+
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -684,6 +717,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "getProposerLookahead", .method = napi.wrapCallback(0, BeaconStateView_getProposerLookahead) },
             .{ .utf8name = "getSingleProof", .method = napi.wrapCallback(1, BeaconStateView_getSingleProof) },
             .{ .utf8name = "isValidVoluntaryExit", .method = napi.wrapCallback(2, BeaconStateView_isValidVoluntaryExit) },
+            .{ .utf8name = "getVoluntaryExitValidity", .method = napi.wrapCallback(2, BeaconStateView_getVoluntaryExitValidity) },
             .{ .utf8name = "isExecutionEnabled", .method = napi.wrapCallback(2, BeaconStateView_isExecutionEnabled) },
             .{ .utf8name = "isExecutionStateType", .method = napi.wrapCallback(0, BeaconStateView_isExecutionStateType) },
             .{ .utf8name = "getEffectiveBalanceIncrementsZeroInactive", .method = napi.wrapCallback(0, BeaconStateView_getEffectiveBalanceIncrementsZeroInactive) },
