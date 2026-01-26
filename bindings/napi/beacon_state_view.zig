@@ -169,6 +169,21 @@ pub fn BeaconStateView_pendingConsolidationsLength(env: napi.Env, cb: napi.Callb
     return try env.createInt64(@intCast(try pending_consolidations.length()));
 }
 
+pub fn BeaconStateView_clonedCount(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    return try env.createInt64(@intCast(cached_state.cloned_count));
+}
+
+pub fn BeaconStateView_clonedCountWithTransferCache(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    return try env.createInt64(@intCast(cached_state.cloned_count_with_transfer_cache));
+}
+
+pub fn BeaconStateView_createdWithTransferCache(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    return try env.getBoolean(cached_state.created_with_transfer_cache);
+}
+
 pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
     const index: u64 = @intCast(try cb.arg(0).getValueInt64());
@@ -263,6 +278,9 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             .{ .utf8name = "finalizedCheckpoint", .getter = napi.wrapCallback(0, BeaconStateView_finalizedCheckpoint) },
             .{ .utf8name = "proposers", .getter = napi.wrapCallback(0, BeaconStateView_proposers) },
             .{ .utf8name = "proposersNextEpoch", .getter = napi.wrapCallback(0, BeaconStateView_proposersNextEpoch) },
+            .{ .utf8name = "clonedCount", .getter = napi.wrapCallback(0, BeaconStateView_clonedCount) },
+            .{ .utf8name = "clonedCountWithTransferCache", .getter = napi.wrapCallback(0, BeaconStateView_clonedCountWithTransferCache) },
+            .{ .utf8name = "createdWithTransferCache", .getter = napi.wrapCallback(0, BeaconStateView_createdWithTransferCache) },
             .{ .utf8name = "pendingDepositsLength", .getter = napi.wrapCallback(0, BeaconStateView_pendingDepositsLength) },
             .{ .utf8name = "pendingPartialWithdrawalsLength", .getter = napi.wrapCallback(0, BeaconStateView_pendingPartialWithdrawalsLength) },
             .{ .utf8name = "pendingConsolidationsLength", .getter = napi.wrapCallback(0, BeaconStateView_pendingConsolidationsLength) },
