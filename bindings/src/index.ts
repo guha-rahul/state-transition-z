@@ -80,20 +80,6 @@ interface HistoricalSummary {
   stateSummaryRoot: Uint8Array;
 }
 
-interface PendingDeposit {
-  pubkey: Uint8Array;
-  withdrawalCredentials: Uint8Array;
-  amount: bigint;
-  signature: Uint8Array;
-  slot: bigint;
-}
-
-interface PendingPartialWithdrawal {
-  validatorIndex: number;
-  amount: bigint;
-  withdrawableEpoch: bigint;
-}
-
 interface PendingConsolidation {
   sourceIndex: number;
   targetIndex: number;
