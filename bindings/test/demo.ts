@@ -1,6 +1,6 @@
+import * as fs from "node:fs";
 import {config} from "@lodestar/config/default";
 import * as era from "@lodestar/era";
-import * as fs from "fs";
 import bindings from "../src/index.ts";
 
 console.log("loaded bindings");
@@ -49,10 +49,12 @@ const state = printDuration("create state view", () => bindings.BeaconStateView.
 printDuration("write pkix to disk", () => bindings.pubkeys.save(PKIX_FILE));
 
 printDuration("get slot", () => state.slot);
+printDuration("get fork", () => state.fork);
 printDuration("get root", () => state.root);
 printDuration("get epoch", () => state.epoch);
 printDuration("get genesisTime", () => state.genesisTime);
 printDuration("get genesisValidatorsRoot", () => state.genesisValidatorsRoot);
+printDuration("get eth1Data", () => state.eth1Data);
 printDuration("get latestBlockHeader", () => state.latestBlockHeader);
 printDuration("get previousJustifiedCheckpoint", () => state.previousJustifiedCheckpoint);
 printDuration("get currentJustifiedCheckpoint", () => state.currentJustifiedCheckpoint);
@@ -62,6 +64,15 @@ printDuration("get nextDecisionRoot", () => state.nextDecisionRoot);
 printDuration("getShufflingDecisionRoot(state.epoch)", () => state.getShufflingDecisionRoot(state.epoch));
 printDuration("proposers", () => state.proposers);
 printDuration("proposersNextEpoch", () => state.proposersNextEpoch);
+printDuration("proposersPrevEpoch", () => state.proposersPrevEpoch);
+printDuration("currentSyncCommittee", () => state.currentSyncCommittee);
+printDuration("nextSyncCommittee", () => state.nextSyncCommittee);
+printDuration("currentSyncCommitteeIndexed", () => state.currentSyncCommitteeIndexed);
+printDuration("effectiveBalanceIncrements", () => state.effectiveBalanceIncrements);
+printDuration("latestExecutionPayloadHeader", () => state.latestExecutionPayloadHeader);
+printDuration("syncProposerReward", () => state.syncProposerReward);
+printDuration("previousEpochParticipation", () => state.previousEpochParticipation);
+printDuration("currentEpochParticipation", () => state.currentEpochParticipation);
 printDuration("getBalance(0)", () => state.getBalance(0));
 printDuration("getBalance(100)", () => state.getBalance(100));
 printDuration("getValidator(0)", () => state.getValidator(0));
@@ -90,5 +101,15 @@ printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
 printDuration("isExecutionStateType()", () => state.isExecutionStateType());
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());
 printDuration("computeUnrealizedCheckpoints()", () => state.computeUnrealizedCheckpoints());
+printDuration("serialize", () => state.serialize());
+printDuration("serializedSize", () => state.serializedSize());
+printDuration("serializeToBytes", () => {
+  const size = state.serializedSize();
+  const output = new Uint8Array(size);
+  const bytesWritten = state.serializeToBytes(output, 0);
+  console.log(`  wrote ${bytesWritten} bytes`);
+  return output;
+});
+printDuration("hashTreeRoot", () => state.hashTreeRoot());
 printDuration("proposerRewards", () => state.proposerRewards);
 printDuration("processSlots", () => state.processSlots(state.slot+1));
