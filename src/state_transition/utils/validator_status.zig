@@ -22,16 +22,7 @@ pub const ValidatorStatus = enum {
     }
 
     pub fn fromString(s: []const u8) ?ValidatorStatus {
-        if (std.mem.eql(u8, s, "pending_initialized")) return .pending_initialized;
-        if (std.mem.eql(u8, s, "pending_queued")) return .pending_queued;
-        if (std.mem.eql(u8, s, "active_ongoing")) return .active_ongoing;
-        if (std.mem.eql(u8, s, "active_exiting")) return .active_exiting;
-        if (std.mem.eql(u8, s, "active_slashed")) return .active_slashed;
-        if (std.mem.eql(u8, s, "exited_unslashed")) return .exited_unslashed;
-        if (std.mem.eql(u8, s, "exited_slashed")) return .exited_slashed;
-        if (std.mem.eql(u8, s, "withdrawal_possible")) return .withdrawal_possible;
-        if (std.mem.eql(u8, s, "withdrawal_done")) return .withdrawal_done;
-        return null;
+        return std.meta.stringToEnum(ValidatorStatus, s);
     }
 
     /// Check if this status matches a general category.
