@@ -14,17 +14,9 @@ const Index2PubkeyCache = @import("pubkey_cache.zig").Index2PubkeyCache;
 const CloneOpts = @import("ssz").BaseTreeView.CloneOpts;
 
 pub const ProposerRewards = struct {
-    attestations: u64,
-    sync_aggregate: u64,
-    slashing: u64,
-
-    pub fn empty() ProposerRewards {
-        return .{
-            .attestations = 0,
-            .sync_aggregate = 0,
-            .slashing = 0,
-        };
-    }
+    attestations: u64 = 0,
+    sync_aggregate: u64 = 0,
+    slashing: u64 = 0,
 };
 
 pub const CachedBeaconState = struct {
@@ -61,7 +53,7 @@ pub const CachedBeaconState = struct {
             .config = immutable_data.config,
             .epoch_cache_ref = epoch_cache_ref,
             .state = state,
-            .proposer_rewards = ProposerRewards.empty(),
+            .proposer_rewards = .{},
         };
     }
 
