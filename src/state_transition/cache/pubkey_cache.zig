@@ -21,6 +21,10 @@ pub fn syncPubkeys(
     }
 
     const new_count = validators.len;
+    if (new_count == old_len) {
+        return;
+    }
+
     try index_to_pubkey.resize(new_count);
     try pubkey_to_index.ensureTotalCapacity(@intCast(new_count));
 
@@ -29,6 +33,61 @@ pub fn syncPubkeys(
         pubkey_to_index.putAssumeCapacity(pubkey.*, @intCast(i));
         index_to_pubkey.items[i] = try blst.PublicKey.uncompress(pubkey);
     }
+}
+
+fn putPubkeysAtIndices(start_index: usize, end_index_exclusive: usize, validators: []const Validator, pubkey_to_index: *PubkeyIndexMap, index_to_pubkey: *Index2PubkeyCache) void {
+    for (start_index..end_index_exclusive) |i| {
+        const pubkey = &validators[i].pubkey;
+        pubkey_to_index.putAssumeCapacity(pubkey.*, @intCast(i));
+        index_to_pubkey.items[i] = blst.PublicKey.uncompress(pubkey) catch unreachable;
+    }
+}
+
+/// Populate `pubkey_to_index` and `index_to_pubkey` caches from validators list.
+/// Spawns a temporary thread pool to parallelize the work.
+pub fn syncPubkeysParallel(
+    allocator: std.mem.Allocator,
+    validators: []const Validator,
+    pubkey_to_index: *PubkeyIndexMap,
+    index_to_pubkey: *Index2PubkeyCache,
+) !void {
+    const old_len = index_to_pubkey.items.len;
+    if (pubkey_to_index.count() != old_len) {
+        return error.InconsistentCache;
+    }
+
+    const new_count = validators.len;
+    if (new_count == old_len) {
+        return;
+    }
+
+    try index_to_pubkey.resize(new_count);
+    try pubkey_to_index.ensureTotalCapacity(@intCast(new_count));
+
+    var thread_pool: std.Thread.Pool = undefined;
+    try thread_pool.init(.{ .allocator = allocator });
+    defer thread_pool.deinit();
+
+    var wg = std.Thread.WaitGroup{};
+
+    var i = old_len;
+    const batch_size = 1000;
+
+    while (i < new_count) : (i += batch_size) {
+        thread_pool.spawnWg(
+            &wg,
+            putPubkeysAtIndices,
+            .{
+                i,
+                @min(i + batch_size, new_count),
+                validators,
+                pubkey_to_index,
+                index_to_pubkey,
+            },
+        );
+    }
+
+    wg.wait();
 }
 
 // TODO: unit tests
