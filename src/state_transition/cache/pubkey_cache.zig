@@ -1,5 +1,4 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const blst = @import("blst");
 const types = @import("consensus_types");
 const Validator = types.phase0.Validator.Type;

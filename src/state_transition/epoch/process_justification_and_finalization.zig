@@ -1,34 +1,43 @@
 const std = @import("std");
-const CachedBeaconState = @import("../cache/state_cache.zig").CachedBeaconState;
+const ForkSeq = @import("config").ForkSeq;
+const BeaconState = @import("fork_types").BeaconState;
 const types = @import("consensus_types");
-const Epoch = types.primitive.Epoch.Type;
 const Checkpoint = types.phase0.Checkpoint.Type;
 const JustificationBits = types.phase0.JustificationBits.Type;
 const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
 const GENESIS_EPOCH = @import("preset").GENESIS_EPOCH;
 const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
 const getBlockRoot = @import("../utils/block_root.zig").getBlockRoot;
-const ForkSeq = @import("config").ForkSeq;
-
-pub const UnrealizedCheckpoints = struct {
-    justified_checkpoint: Checkpoint,
-    finalized_checkpoint: Checkpoint,
-};
 
 /// Update justified and finalized checkpoints depending on network participation.
 ///
 /// PERF: Very low (constant) cost. Persist small objects to the tree.
-pub fn processJustificationAndFinalization(cached_state: *CachedBeaconState, cache: *const EpochTransitionCache) !void {
+pub fn processJustificationAndFinalization(
+    comptime fork: ForkSeq,
+    state: *BeaconState(fork),
+    cache: *const EpochTransitionCache,
+) !void {
     // Initial FFG checkpoint values have a `0x00` stub for `root`.
     // Skip FFG updates in the first two epochs to avoid corner cases that might result in modifying this stub.
     if (cache.current_epoch <= GENESIS_EPOCH + 1) {
         return;
     }
-    try weighJustificationAndFinalization(cached_state, cache.total_active_stake_by_increment, cache.prev_epoch_unslashed_stake_target_by_increment, cache.curr_epoch_unslashed_target_stake_by_increment);
+    try weighJustificationAndFinalization(
+        fork,
+        state,
+        cache.total_active_stake_by_increment,
+        cache.prev_epoch_unslashed_stake_target_by_increment,
+        cache.curr_epoch_unslashed_target_stake_by_increment,
+    );
 }
 
-pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total_active_balance: u64, previous_epoch_target_balance: u64, current_epoch_target_balance: u64) !void {
-    var state = cached_state.state;
+pub fn weighJustificationAndFinalization(
+    comptime fork: ForkSeq,
+    state: *BeaconState(fork),
+    total_active_balance: u64,
+    previous_epoch_target_balance: u64,
+    current_epoch_target_balance: u64,
+) !void {
     const current_epoch = computeEpochAtSlot(try state.slot());
     const previous_epoch = if (current_epoch == GENESIS_EPOCH) GENESIS_EPOCH else current_epoch - 1;
 
@@ -55,7 +64,7 @@ pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total
     if (previous_epoch_target_balance * 3 > total_active_balance * 2) {
         const new_current_justified_checkpoint = Checkpoint{
             .epoch = previous_epoch,
-            .root = (try getBlockRoot(state, previous_epoch)).*,
+            .root = (try getBlockRoot(fork, state, previous_epoch)).*,
         };
         try state.setCurrentJustifiedCheckpoint(&new_current_justified_checkpoint);
         bits[1] = true;
@@ -64,7 +73,7 @@ pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total
     if (current_epoch_target_balance * 3 > total_active_balance * 2) {
         const new_current_justified_checkpoint = Checkpoint{
             .epoch = current_epoch,
-            .root = (try getBlockRoot(state, current_epoch)).*,
+            .root = (try getBlockRoot(fork, state, current_epoch)).*,
         };
         try state.setCurrentJustifiedCheckpoint(&new_current_justified_checkpoint);
         bits[0] = true;
@@ -92,70 +101,21 @@ pub fn weighJustificationAndFinalization(cached_state: *CachedBeaconState, total
     }
 }
 
-/// Compute on-the-fly justified / finalized checkpoints.
-///   - For phase0, we need to create the cache through beforeProcessEpoch
-///   - For other forks, use the progressive balances inside EpochCache
-pub fn computeUnrealizedCheckpoints(cached_state: *CachedBeaconState, allocator: std.mem.Allocator) !UnrealizedCheckpoints {
-    // For phase0, we need to create the cache through beforeProcessEpoch
-    if (cached_state.state.forkSeq() == .phase0) {
-        // Clone state to mutate below         true = do not transfer cache
-        const cloned_state = try cached_state.clone(allocator, .{ .transfer_cache = false });
-        defer cloned_state.deinit();
-        defer allocator.destroy(cloned_state);
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+const Node = @import("persistent_merkle_tree").Node;
 
-        const epoch_transition_cache = try EpochTransitionCache.init(allocator, cloned_state);
-        defer epoch_transition_cache.deinit();
-        defer allocator.destroy(epoch_transition_cache);
+test "processJustificationAndFinalization - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(allocator, pool_size);
+    defer pool.deinit();
 
-        try processJustificationAndFinalization(cloned_state, epoch_transition_cache);
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
 
-        var justified: Checkpoint = undefined;
-        try cloned_state.state.currentJustifiedCheckpoint(&justified);
-        var finalized: Checkpoint = undefined;
-        try cloned_state.state.finalizedCheckpoint(&finalized);
-
-        return .{
-            .justified_checkpoint = justified,
-            .finalized_checkpoint = finalized,
-        };
-    }
-
-    // For other forks, use the progressive balances inside EpochCache
-    const epoch_cache = cached_state.getEpochCache();
-    const current_epoch = epoch_cache.epoch;
-
-    // same logic to processJustificationAndFinalization
-    if (current_epoch <= GENESIS_EPOCH + 1) {
-        var justified: Checkpoint = undefined;
-        try cached_state.state.currentJustifiedCheckpoint(&justified);
-        var finalized: Checkpoint = undefined;
-        try cached_state.state.finalizedCheckpoint(&finalized);
-        return .{
-            .justified_checkpoint = justified,
-            .finalized_checkpoint = finalized,
-        };
-    }
-
-    // Clone state and use progressive balances
-    // Clone state to mutate below         true = do not transfer cache
-    const cloned_state = try cached_state.clone(allocator, .{ .transfer_cache = false });
-    defer cloned_state.deinit();
-    defer allocator.destroy(cloned_state);
-
-    const total_active_balance = epoch_cache.total_active_balance_increments;
-    // minimum of total progressive unslashed balance should be 1
-    const previous_epoch_target_balance = @max(epoch_cache.previous_target_unslashed_balance_increments, 1);
-    const current_epoch_target_balance = @max(epoch_cache.current_target_unslashed_balance_increments, 1);
-
-    try weighJustificationAndFinalization(cloned_state, total_active_balance, previous_epoch_target_balance, current_epoch_target_balance);
-
-    var justified: Checkpoint = undefined;
-    try cloned_state.state.currentJustifiedCheckpoint(&justified);
-    var finalized: Checkpoint = undefined;
-    try cloned_state.state.finalizedCheckpoint(&finalized);
-
-    return .{
-        .justified_checkpoint = justified,
-        .finalized_checkpoint = finalized,
-    };
+    try processJustificationAndFinalization(
+        .electra,
+        test_state.cached_state.state.castToFork(.electra),
+        test_state.epoch_transition_cache,
+    );
 }
