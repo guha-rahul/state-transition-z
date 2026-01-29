@@ -17,7 +17,7 @@ pub const ValidatorStatus = enum {
     withdrawal_possible,
     withdrawal_done,
 
-    pub fn toString(self: ValidatorStatus) []const u8 {
+    pub fn toString(self: ValidatorStatus) [:0]const u8 {
         return @tagName(self);
     }
 

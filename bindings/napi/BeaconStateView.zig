@@ -228,15 +228,8 @@ pub fn BeaconStateView_historicalSummaries(env: napi.Env, cb: napi.CallbackInfo(
     };
     defer allocator.free(summaries);
 
-    const result = try env.createArray();
-    for (summaries, 0..) |summary, i| {
-        const obj = try env.createObject();
-        try obj.setNamedProperty("blockSummaryRoot", try sszValueToNapiValue(env, ct.primitive.Root, &summary.block_summary_root));
-        try obj.setNamedProperty("stateSummaryRoot", try sszValueToNapiValue(env, ct.primitive.Root, &summary.state_summary_root));
-        try result.setElement(@intCast(i), obj);
-    }
-
-    return result;
+    const summaries_arraylist = ct.capella.HistoricalSummaries.Type.fromOwnedSlice(summaries);
+    return try sszValueToNapiValue(env, ct.capella.HistoricalSummaries, &summaries_arraylist);
 }
 
 /// Get the pending deposits from the state (Electra+).
@@ -316,15 +309,8 @@ pub fn BeaconStateView_pendingConsolidations(env: napi.Env, cb: napi.CallbackInf
     };
     defer allocator.free(consolidations);
 
-    const result = try env.createArray();
-    for (consolidations, 0..) |consolidation, i| {
-        const obj = try env.createObject();
-        try obj.setNamedProperty("sourceIndex", try env.createInt64(@intCast(consolidation.source_index)));
-        try obj.setNamedProperty("targetIndex", try env.createInt64(@intCast(consolidation.target_index)));
-        try result.setElement(@intCast(i), obj);
-    }
-
-    return result;
+    const consolidations_arraylist = ct.electra.PendingConsolidations.Type.fromOwnedSlice(consolidations);
+    return try sszValueToNapiValue(env, ct.electra.PendingConsolidations, &consolidations_arraylist);
 }
 
 pub fn BeaconStateView_pendingConsolidationsCount(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
@@ -451,9 +437,9 @@ pub fn BeaconStateView_nextSyncCommittee(env: napi.Env, cb: napi.CallbackInfo(0)
 
 pub fn BeaconStateView_currentSyncCommitteeIndexed(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
-    const result = cached_state.getEpochCache().current_sync_committee_indexed.get();
-    const validator_indices = result.getValidatorIndices();
-    const validator_index_map = result.getValidatorIndexMap();
+    const sync_committee_cache = cached_state.getEpochCache().current_sync_committee_indexed.get();
+    const validator_indices = sync_committee_cache.getValidatorIndices();
+    const validator_index_map = sync_committee_cache.getValidatorIndexMap();
     const obj = try env.createObject();
     try obj.setNamedProperty(
         "validatorIndices",
@@ -521,15 +507,7 @@ pub fn BeaconStateView_getEffectiveBalanceIncrementsZeroInactive(env: napi.Env, 
     var result = try st.getEffectiveBalanceIncrementsZeroInactive(allocator, cached_state);
     defer result.deinit();
 
-    const validator_count = result.items.len;
-
-    // Create Uint16Array to return
-    var arraybuffer_bytes: [*]u8 = undefined;
-    const arraybuffer = try env.createArrayBuffer(validator_count * 2, &arraybuffer_bytes);
-    const dest = @as([*]u16, @ptrCast(@alignCast(arraybuffer_bytes)));
-    @memcpy(dest[0..validator_count], result.items);
-
-    return try env.createTypedarray(.uint16, validator_count, arraybuffer, 0);
+    return try numberSliceToNapiValue(env, u16, result.items, .{ .typed_array = .uint16 });
 }
 
 pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
@@ -550,20 +528,7 @@ pub fn BeaconStateView_getValidator(env: napi.Env, cb: napi.CallbackInfo(1)) !na
     var validator: ct.phase0.Validator.Type = undefined;
     try validator_view.toValue(allocator, &validator);
 
-    const obj = try env.createObject();
-    // pubkey is 48 bytes, create Uint8Array directly
-    var pubkey_bytes: [*]u8 = undefined;
-    const pubkey_buf = try env.createArrayBuffer(48, &pubkey_bytes);
-    @memcpy(pubkey_bytes[0..48], &validator.pubkey);
-    try obj.setNamedProperty("pubkey", try env.createTypedarray(.uint8, 48, pubkey_buf, 0));
-    try obj.setNamedProperty("withdrawalCredentials", try sszValueToNapiValue(env, ct.primitive.Bytes32, &validator.withdrawal_credentials));
-    try obj.setNamedProperty("effectiveBalance", try env.createBigintUint64(validator.effective_balance));
-    try obj.setNamedProperty("slashed", try env.getBoolean(validator.slashed));
-    try obj.setNamedProperty("activationEligibilityEpoch", try env.createBigintUint64(validator.activation_eligibility_epoch));
-    try obj.setNamedProperty("activationEpoch", try env.createBigintUint64(validator.activation_epoch));
-    try obj.setNamedProperty("exitEpoch", try env.createBigintUint64(validator.exit_epoch));
-    try obj.setNamedProperty("withdrawableEpoch", try env.createBigintUint64(validator.withdrawable_epoch));
-    return obj;
+    return try sszValueToNapiValue(env, ct.phase0.Validator, &validator);
 }
 
 /// Get the status of a validator by index.
@@ -587,8 +552,7 @@ pub fn BeaconStateView_getValidatorStatus(env: napi.Env, cb: napi.CallbackInfo(1
 /// Get the total number of validators in the registry.
 pub fn BeaconStateView_validatorCount(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
-    var validators = try cached_state.state.validators();
-    const count = try validators.length();
+    const count = try cached_state.state.validatorsCount();
     return try env.createInt64(@intCast(count));
 }
 
@@ -863,7 +827,6 @@ pub fn BeaconStateView_serializeValidators(env: napi.Env, cb: napi.CallbackInfo(
     var arraybuffer_bytes: [*]u8 = undefined;
     const arraybuffer = try env.createArrayBuffer(size, &arraybuffer_bytes);
     _ = try validators_view.serializeIntoBytes(arraybuffer_bytes[0..size]);
-
     return try env.createTypedarray(.uint8, size, arraybuffer, 0);
 }
 
