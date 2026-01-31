@@ -230,15 +230,19 @@ pub fn BeaconStateView_historicalSummaries(env: napi.Env, cb: napi.CallbackInfo(
         return env.getNull();
     };
 
-    // Bulk read all values at once
-    const summaries = historical_summaries.getAllReadonlyValues(allocator) catch {
-        try env.throwError("STATE_ERROR", "Failed to get historicalSummaries values");
+    const size = historical_summaries.serializedSize() catch {
+        try env.throwError("STATE_ERROR", "Failed to get historicalSummaries size");
         return env.getNull();
     };
-    defer allocator.free(summaries);
 
-    const summaries_arraylist = ct.capella.HistoricalSummaries.Type.fromOwnedSlice(summaries);
-    return try sszValueToNapiValue(env, ct.capella.HistoricalSummaries, &summaries_arraylist);
+    var bytes: [*]u8 = undefined;
+    const buf = try env.createArrayBuffer(size, &bytes);
+    _ = historical_summaries.serializeIntoBytes(bytes[0..size]) catch {
+        try env.throwError("STATE_ERROR", "Failed to serialize historicalSummaries");
+        return env.getNull();
+    };
+
+    return try env.createTypedarray(.uint8, size, buf, 0);
 }
 
 /// Get the pending deposits from the state (Electra+).
