@@ -6,6 +6,11 @@ const Gindex = @import("gindex.zig").Gindex;
 const proof = @import("proof.zig");
 const Depth = @import("hashing").Depth;
 
+const DescriptorTestCase = struct {
+    input: []const u8,
+    output: []const bool,
+};
+
 const descriptor_test_cases = [_]DescriptorTestCase{
     .{
         .input = &[_]u8{0b1000_0000},
@@ -152,11 +157,6 @@ test "single proof invalid gindex" {
     const empty_witnesses: []const [32]u8 = &[_][32]u8{};
     try testing.expectError(proof.Error.InvalidGindex, proof.createNodeFromSingleProof(&pool, zero_gindex, leaf_hash, empty_witnesses));
 }
-
-const DescriptorTestCase = struct {
-    input: []const u8,
-    output: []const bool,
-};
 
 test "descriptorToBitlist - should convert valid descriptor to a bitlist" {
     for (descriptor_test_cases) |case| {
