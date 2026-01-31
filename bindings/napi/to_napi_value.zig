@@ -1,3 +1,4 @@
+const std = @import("std");
 const ssz = @import("ssz");
 const napi = @import("zapi:napi");
 
@@ -44,7 +45,7 @@ pub fn sszValueToNapiValue(env: napi.Env, comptime ST: type, value: *const ST.Ty
             inline for (ST.fields) |field| {
                 const field_value = &@field(value, field.name);
                 const napi_field_value = try sszValueToNapiValue(env, field.type, field_value);
-                try obj.setNamedProperty(field.name, napi_field_value);
+                try obj.setNamedProperty(snakeToCamel(field.name), napi_field_value);
             }
             return obj;
         },
@@ -68,7 +69,9 @@ pub fn numberSliceToNapiValue(
         if (T == typed_array_type.elementType()) {
             @memcpy(bytes[0..bytes_len], @as([]const u8, @ptrCast(numbers)));
         } else {
-            var bytes_numbers: []T = @ptrCast(bytes[0..bytes_len]);
+            const ET = typed_array_type.elementType();
+            const bytes_numbers_ptr: [*]ET = @ptrCast(@alignCast(bytes));
+            const bytes_numbers = bytes_numbers_ptr[0..numbers.len];
             for (numbers, 0..) |num, i| {
                 bytes_numbers[i] = @intCast(num);
             }
@@ -82,4 +85,38 @@ pub fn numberSliceToNapiValue(
         }
         return arr;
     }
+}
+
+fn snakeToCamel(comptime str: []const u8) [:0]const u8 {
+    const count = comptime count: {
+        var n: usize = 0;
+        for (str) |c| {
+            if (c != '_') n += 1;
+        }
+        break :count n;
+    };
+
+    const result = comptime result: {
+        var buf: [count:0]u8 = undefined;
+        var out_idx: usize = 0;
+        var capitalize = false;
+
+        for (str) |c| {
+            if (c == '_') {
+                capitalize = true;
+            } else {
+                if (capitalize) {
+                    buf[out_idx] = std.ascii.toUpper(c);
+                    capitalize = false;
+                } else {
+                    buf[out_idx] = c;
+                }
+                out_idx += 1;
+            }
+        }
+        buf[count] = 0;
+        break :result buf;
+    };
+
+    return &result;
 }

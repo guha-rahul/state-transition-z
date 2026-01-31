@@ -1,4 +1,7 @@
-const CachedBeaconState = @import("../cache/state_cache.zig").CachedBeaconState;
+const BeaconConfig = @import("config").BeaconConfig;
+const ForkSeq = @import("config").ForkSeq;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
+const BeaconState = @import("fork_types").BeaconState;
 const types = @import("consensus_types");
 const c = @import("constants");
 const SignedVoluntaryExit = types.phase0.SignedVoluntaryExit.Type;
@@ -9,45 +12,100 @@ const initiateValidatorExit = @import("./initiate_validator_exit.zig").initiateV
 
 const FAR_FUTURE_EPOCH = c.FAR_FUTURE_EPOCH;
 
-pub fn processVoluntaryExit(cached_state: *CachedBeaconState, signed_voluntary_exit: *const SignedVoluntaryExit, verify_signature: bool) !void {
-    if (!try isValidVoluntaryExit(cached_state, signed_voluntary_exit, verify_signature)) {
+pub fn processVoluntaryExit(
+    comptime fork: ForkSeq,
+    config: *const BeaconConfig,
+    epoch_cache: *EpochCache,
+    state: *BeaconState(fork),
+    signed_voluntary_exit: *const SignedVoluntaryExit,
+    verify_signature: bool,
+) !void {
+    if (!try isValidVoluntaryExit(fork, config, epoch_cache, state, signed_voluntary_exit, verify_signature)) {
         return error.InvalidVoluntaryExit;
     }
 
-    var validators = try cached_state.state.validators();
+    var validators = try state.validators();
     var validator = try validators.get(@intCast(signed_voluntary_exit.message.validator_index));
-    try initiateValidatorExit(cached_state, &validator);
+    try initiateValidatorExit(fork, config, epoch_cache, state, &validator);
 }
 
-pub fn isValidVoluntaryExit(cached_state: *CachedBeaconState, signed_voluntary_exit: *const SignedVoluntaryExit, verify_signature: bool) !bool {
-    const state = cached_state.state;
-    const epoch_cache = cached_state.getEpochCache();
-    const config = cached_state.config.chain;
+pub fn isValidVoluntaryExit(
+    comptime fork: ForkSeq,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
+    signed_voluntary_exit: *const SignedVoluntaryExit,
+    verify_signature: bool,
+) !bool {
+    return try getVoluntaryExitValidity(fork, config, epoch_cache, state, signed_voluntary_exit, verify_signature) == .valid;
+}
+
+pub const VoluntaryExitValidity = enum {
+    valid,
+    inactive,
+    already_exited,
+    early_epoch,
+    short_time_active,
+    pending_withdrawals,
+    invalid_signature,
+};
+
+pub fn getVoluntaryExitValidity(
+    comptime fork: ForkSeq,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
+    signed_voluntary_exit: *const SignedVoluntaryExit,
+    verify_signature: bool,
+) !VoluntaryExitValidity {
     const voluntary_exit = signed_voluntary_exit.message;
 
     var validators = try state.validators();
     const validators_len = try validators.length();
     if (voluntary_exit.validator_index >= validators_len) {
-        return false;
+        return .inactive;
     }
 
     var validator = try validators.get(@intCast(voluntary_exit.validator_index));
     const current_epoch = epoch_cache.epoch;
 
-    const activation_epoch = try validator.get("activation_epoch");
+    // verify the validator is active
+    if (!try isActiveValidatorView(&validator, current_epoch)) {
+        return .inactive;
+    }
+
+    // verify exit has not been initiated
     const exit_epoch = try validator.get("exit_epoch");
-    return (
-        // verify the validator is active
-        (try isActiveValidatorView(&validator, current_epoch)) and
-            // verify exit has not been initiated
-            exit_epoch == FAR_FUTURE_EPOCH and
-            // exits must specify an epoch when they become valid; they are not valid before then
-            current_epoch >= voluntary_exit.epoch and
-            // verify the validator had been active long enough
-            current_epoch >= activation_epoch + config.SHARD_COMMITTEE_PERIOD and
-            (if (state.forkSeq().gte(.electra)) try getPendingBalanceToWithdraw(state, voluntary_exit.validator_index) == 0 else true) and
-            // verify signature
-            if (verify_signature) try verifyVoluntaryExitSignature(cached_state, signed_voluntary_exit) else true);
+    if (exit_epoch != FAR_FUTURE_EPOCH) {
+        return .already_exited;
+    }
+
+    // exits must specify an epoch when they become valid; they are not valid before then
+    if (current_epoch < voluntary_exit.epoch) {
+        return .early_epoch;
+    }
+
+    // verify the validator had been active long enough
+    const activation_epoch = try validator.get("activation_epoch");
+    if (current_epoch < activation_epoch + config.chain.SHARD_COMMITTEE_PERIOD) {
+        return .short_time_active;
+    }
+
+    // only exit validator if it has no pending withdrawals in the queue (Electra+)
+    if (comptime fork.gte(.electra)) {
+        if (try getPendingBalanceToWithdraw(fork, state, voluntary_exit.validator_index) != 0) {
+            return .pending_withdrawals;
+        }
+    }
+
+    // verify signature
+    if (verify_signature) {
+        if (!try verifyVoluntaryExitSignature(config, epoch_cache, signed_voluntary_exit)) {
+            return .invalid_signature;
+        }
+    }
+
+    return .valid;
 }
 
 // TODO: unit test

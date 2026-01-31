@@ -7,11 +7,16 @@ const EpochCacheRc = @import("./epoch_cache.zig").EpochCacheRc;
 const EpochCache = @import("./epoch_cache.zig").EpochCache;
 const EpochCacheImmutableData = @import("./epoch_cache.zig").EpochCacheImmutableData;
 const EpochCacheOpts = @import("./epoch_cache.zig").EpochCacheOpts;
-const BeaconState = @import("../types/beacon_state.zig").BeaconState;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
-const PubkeyIndexMap = @import("pubkey_cache.zig").PubkeyIndexMap(ValidatorIndex);
-const Index2PubkeyCache = @import("pubkey_cache.zig").Index2PubkeyCache;
 const CloneOpts = @import("ssz").BaseTreeView.CloneOpts;
+const Node = @import("persistent_merkle_tree").Node;
+
+pub const ProposerRewards = struct {
+    attestations: u64 = 0,
+    sync_aggregate: u64 = 0,
+    slashing: u64 = 0,
+};
 
 pub const CachedBeaconState = struct {
     allocator: Allocator,
@@ -21,13 +26,16 @@ pub const CachedBeaconState = struct {
     /// TODO: before an epoch transition, need to release() epoch_cache before using a new one
     epoch_cache_ref: *EpochCacheRc,
     /// this takes ownership of the state, it is expected to be deinitialized by this struct
-    state: *BeaconState,
+    state: *AnyBeaconState,
+    /// Proposer rewards accumulated during block processing
+    proposer_rewards: ProposerRewards,
 
-    // TODO: cloned_count properties, implement this once we switch to TreeView
-    // TODO: proposer_rewards, looks like this is not a great place to put in, it's a result of a block state transition instead
+    cloned_count: u32 = 0,
+    cloned_count_with_transfer_cache: u32 = 0,
+    created_with_transfer_cache: bool = false,
 
     /// This class takes ownership of state after this function and has responsibility to deinit it
-    pub fn createCachedBeaconState(allocator: Allocator, state: *BeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !*CachedBeaconState {
+    pub fn createCachedBeaconState(allocator: Allocator, state: *AnyBeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !*CachedBeaconState {
         const cached_state = try allocator.create(CachedBeaconState);
         errdefer allocator.destroy(cached_state);
 
@@ -36,7 +44,7 @@ pub const CachedBeaconState = struct {
         return cached_state;
     }
 
-    pub fn init(self: *CachedBeaconState, allocator: Allocator, state: *BeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !void {
+    pub fn init(self: *CachedBeaconState, allocator: Allocator, state: *AnyBeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !void {
         const epoch_cache = try EpochCache.createFromState(allocator, state, immutable_data, option);
         errdefer epoch_cache.deinit();
         const epoch_cache_ref = try EpochCacheRc.init(allocator, epoch_cache);
@@ -46,6 +54,7 @@ pub const CachedBeaconState = struct {
             .config = immutable_data.config,
             .epoch_cache_ref = epoch_cache_ref,
             .state = state,
+            .proposer_rewards = .{},
         };
     }
 
@@ -54,13 +63,18 @@ pub const CachedBeaconState = struct {
         return self.epoch_cache_ref.get();
     }
 
+    /// Get the proposer rewards for the state.
+    pub fn getProposerRewards(self: *const CachedBeaconState) ProposerRewards {
+        return self.proposer_rewards;
+    }
+
     pub fn clone(self: *CachedBeaconState, allocator: Allocator, opts: CloneOpts) !*CachedBeaconState {
         const cached_state = try allocator.create(CachedBeaconState);
         errdefer allocator.destroy(cached_state);
         const epoch_cache_ref = self.epoch_cache_ref.acquire();
         errdefer epoch_cache_ref.release();
 
-        const state = try allocator.create(BeaconState);
+        const state = try allocator.create(AnyBeaconState);
         errdefer allocator.destroy(state);
         state.* = try self.state.clone(opts);
 
@@ -69,7 +83,15 @@ pub const CachedBeaconState = struct {
             .config = self.config,
             .epoch_cache_ref = epoch_cache_ref,
             .state = state,
+            .proposer_rewards = self.proposer_rewards,
+            .created_with_transfer_cache = opts.transfer_cache,
         };
+
+        self.cloned_count += 1;
+        if (opts.transfer_cache) {
+            self.cloned_count_with_transfer_cache += 1;
+        }
+
         return cached_state;
     }
 
@@ -117,12 +139,27 @@ pub const CachedBeaconState = struct {
         }
         return self.getEpochCache().getBeaconProposer(slot);
     }
+
+    /// Get the previous decision root for the state from the epoch cache.
+    pub fn previousDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.getEpochCache().previous_decision_root;
+    }
+
+    /// Get the current decision root for the state from the epoch cache.
+    pub fn currentDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.getEpochCache().current_decision_root;
+    }
+
+    /// Get the next decision root for the state from the epoch cache.
+    pub fn nextDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.getEpochCache().next_decision_root;
+    }
 };
 
 test "CachedBeaconState.clone()" {
     const allocator = std.testing.allocator;
-    const Node = @import("persistent_merkle_tree").Node;
-    var pool = try Node.Pool.init(allocator, 500_000);
+    const pool_size = 256 * 5;
+    var pool = try Node.Pool.init(allocator, pool_size);
     defer pool.deinit();
 
     var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
