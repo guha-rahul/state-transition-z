@@ -495,7 +495,7 @@ fn runBenchmark(comptime fork: ForkSeq, allocator: std.mem.Allocator, pool: *Nod
     const validators = try beacon_state.validatorsSlice(allocator);
     defer allocator.free(validators);
 
-    try state_transition.syncPubkeys(validators, pubkey_index_map, index_pubkey_cache);
+    try state_transition.syncPubkeys(validators, &pubkey_index_map, &index_pubkey_cache);
 
     const cached_state = try CachedBeaconState.createCachedBeaconState(allocator, beacon_state, .{
         .config = &beacon_config,
