@@ -140,7 +140,7 @@ test computeCommitteeCount {
 
 /// Calculate the decision root for a given epoch.
 pub fn calculateDecisionRoot(state: *AnyBeaconState, epoch: Epoch) ![32]u8 {
-    const pivot_slot = computeStartSlotAtEpoch(epoch - 1) - 1;
+    const pivot_slot = computeStartSlotAtEpoch(epoch -| 1) -| 1;
     const block_root = switch (state.forkSeq()) {
         inline else => |f| try getBlockRootAtSlot(f, state.castToFork(f), pivot_slot),
     };
