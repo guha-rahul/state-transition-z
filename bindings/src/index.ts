@@ -1,9 +1,3 @@
-// TODO make robust for production use ala bun-ffi-z
-
-import { createRequire } from "node:module";
-import { join } from "node:path";
-
-const require = createRequire(import.meta.url);
 
 interface BeaconBlockHeader {
   slot: number;
@@ -252,4 +246,7 @@ type Bindings = {
   deinit: () => void;
 };
 
-export default require(join(import.meta.dirname, "../../zig-out/lib/bindings.node")) as Bindings;
+import { join } from "node:path";
+import { requireNapiLibrary } from "@chainsafe/zapi";
+
+export default requireNapiLibrary(join(import.meta.dirname, "../..")) as Bindings;
