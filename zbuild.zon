@@ -237,6 +237,7 @@
                     .persistent_merkle_tree,
                     .ssz,
                     .consensus_types,
+                    .constants,
                     .preset,
                     .config,
                     .fork_types,
