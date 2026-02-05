@@ -735,7 +735,12 @@ pub fn BeaconStateView_getFinalizedRootProof(env: napi.Env, cb: napi.CallbackInf
     defer proof.deinit(allocator);
 
     const witnesses = std.ArrayListUnmanaged([32]u8).fromOwnedSlice(proof.witnesses);
-    return try sszValueToNapiValue(env, ct.misc.Roots, &witnesses);
+    return try sszValueToNapiValue(
+        env,
+        // a compatible type for "a list of roots"
+        ct.phase0.HistoricalRoots,
+        &witnesses,
+    );
 }
 
 // pub fn BeaconStateView_getSyncCommitteesWitness
