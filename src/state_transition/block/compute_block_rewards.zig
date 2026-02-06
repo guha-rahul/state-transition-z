@@ -48,6 +48,7 @@ pub fn computeBlockRewards(allocator: Allocator, cached_state: *CachedBeaconStat
     const attester_slashings_reward = try computeBlockAttesterSlashingsReward(allocator, cached_state, block);
 
     const total = attestations_reward + sync_aggregate_reward + proposer_slashings_reward + attester_slashings_reward;
+    std.debug.assert(total >= attestations_reward);
 
     return BlockRewards{
         .proposer_index = block.proposerIndex(),
@@ -93,6 +94,7 @@ fn computeSyncAggregateReward(cached_state: *CachedBeaconState, block: AnyBeacon
     const sync_aggregate = try block.beaconBlockBody().syncAggregate();
     const sync_proposer_reward = epoch_cache.sync_proposer_reward;
 
+    std.debug.assert(preset.SYNC_COMMITTEE_SIZE > 0);
     var participant_count: u64 = 0;
     for (0..preset.SYNC_COMMITTEE_SIZE) |i| {
         if (sync_aggregate.sync_committee_bits.get(i) catch false) {
@@ -120,6 +122,7 @@ fn computeBlockProposerSlashingsReward(cached_state: *CachedBeaconState, block: 
             preset.WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA
         else
             preset.WHISTLEBLOWER_REWARD_QUOTIENT;
+        std.debug.assert(whistleblower_reward_quotient > 0);
 
         proposer_slashing_reward += @divFloor(effective_balance, whistleblower_reward_quotient);
     }
@@ -139,6 +142,7 @@ fn computeBlockAttesterSlashingsReward(allocator: Allocator, cached_state: *Cach
         preset.WHISTLEBLOWER_REWARD_QUOTIENT_ELECTRA
     else
         preset.WHISTLEBLOWER_REWARD_QUOTIENT;
+    std.debug.assert(whistleblower_reward_quotient > 0);
 
     const attester_slashings = block.beaconBlockBody().attesterSlashings();
     switch (attester_slashings) {

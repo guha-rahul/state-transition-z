@@ -121,6 +121,8 @@ fn computeIdealAttestationsRewardsAndPenaltiesAltair(
     const fork_seq = cached_state.state.forkSeq();
     const base_reward_per_increment = transition_cache.base_reward_per_increment;
     const total_active_stake_by_increment = transition_cache.total_active_stake_by_increment;
+    std.debug.assert(total_active_stake_by_increment > 0);
+    std.debug.assert(c.WEIGHT_DENOMINATOR > 0);
     const epoch_cache = cached_state.getEpochCache();
     const in_inactivity_leak = isInInactivityLeak(epoch_cache.epoch, try cached_state.state.finalizedEpoch());
 
@@ -225,6 +227,7 @@ fn computeTotalAttestationsRewardsAltair(
     const effective_balance_increments = epoch_cache.getEffectiveBalanceIncrements().items;
 
     const inactivity_penalty_denominator = config.chain.INACTIVITY_SCORE_BIAS * preset.INACTIVITY_PENALTY_QUOTIENT_ALTAIR;
+    std.debug.assert(inactivity_penalty_denominator > 0);
 
     // Build filter set if validatorIds provided
     var filter_set = std.AutoHashMap(ValidatorIndex, void).init(allocator);
@@ -248,6 +251,8 @@ fn computeTotalAttestationsRewardsAltair(
         }
 
         const eff_bal_inc = effective_balance_increments[i];
+        std.debug.assert(eff_bal_inc < ideal_rewards.len);
+        std.debug.assert(eff_bal_inc < penalties.len);
         var reward = TotalAttestationsReward{
             .validator_index = @intCast(i),
             .head = 0,

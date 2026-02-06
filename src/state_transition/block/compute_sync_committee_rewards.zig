@@ -28,8 +28,10 @@ pub fn computeSyncCommitteeRewards(
     }
 
     const epoch_cache = cached_state.getEpochCache();
+    std.debug.assert(preset.SYNC_COMMITTEE_SIZE > 0);
     const sync_committee_indices = @as(*const [preset.SYNC_COMMITTEE_SIZE]ValidatorIndex, @ptrCast(epoch_cache.current_sync_committee_indexed.get().getValidatorIndices()));
     const sync_participant_reward: i64 = @intCast(epoch_cache.sync_participant_reward);
+    std.debug.assert(sync_participant_reward >= 0);
 
     const sync_aggregate = try block.beaconBlockBody().syncAggregate();
     const sync_committee_bits = sync_aggregate.sync_committee_bits;
