@@ -59,41 +59,41 @@ interface CompactMultiProof {
 }
 
 interface ProposerRewards {
-  attestations: bigint;
-  syncAggregate: bigint;
-  slashing: bigint;
+  attestations: number;
+  syncAggregate: number;
+  slashing: number;
 }
 
 interface BlockRewards {
   proposerIndex: number;
-  total: bigint;
-  attestations: bigint;
-  syncAggregate: bigint;
-  proposerSlashings: bigint;
-  attesterSlashings: bigint;
+  total: number;
+  attestations: number;
+  syncAggregate: number;
+  proposerSlashings: number;
+  attesterSlashings: number;
 }
 
 interface SyncCommitteeReward {
   validatorIndex: number;
-  reward: bigint;
+  reward: number;
 }
 
 interface IdealAttestationsReward {
-  effectiveBalance: bigint;
-  head: bigint;
-  target: bigint;
-  source: bigint;
-  inclusionDelay: bigint;
-  inactivity: bigint;
+  effectiveBalance: number;
+  head: number;
+  target: number;
+  source: number;
+  inclusionDelay: number;
+  inactivity: number;
 }
 
 interface TotalAttestationsReward {
   validatorIndex: number;
-  head: bigint;
-  target: bigint;
-  source: bigint;
-  inclusionDelay: bigint;
-  inactivity: bigint;
+  head: number;
+  target: number;
+  source: number;
+  inclusionDelay: number;
+  inactivity: number;
 }
 
 interface AttestationsRewards {

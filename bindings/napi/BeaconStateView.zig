@@ -651,18 +651,9 @@ pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) 
     const rewards = cached_state.getProposerRewards();
 
     const obj = try env.createObject();
-    try obj.setNamedProperty(
-        "attestations",
-        try env.createBigintUint64(rewards.attestations),
-    );
-    try obj.setNamedProperty(
-        "syncAggregate",
-        try env.createBigintUint64(rewards.sync_aggregate),
-    );
-    try obj.setNamedProperty(
-        "slashing",
-        try env.createBigintUint64(rewards.slashing),
-    );
+    try obj.setNamedProperty("attestations", try env.createInt64(@intCast(rewards.attestations)));
+    try obj.setNamedProperty("syncAggregate", try env.createInt64(@intCast(rewards.sync_aggregate)));
+    try obj.setNamedProperty("slashing", try env.createInt64(@intCast(rewards.slashing)));
     return obj;
 }
 
@@ -690,11 +681,11 @@ pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(
 
     const obj = try env.createObject();
     try obj.setNamedProperty("proposerIndex", try env.createInt64(@intCast(rewards.proposer_index)));
-    try obj.setNamedProperty("total", try env.createBigintUint64(rewards.total));
-    try obj.setNamedProperty("attestations", try env.createBigintUint64(rewards.attestations));
-    try obj.setNamedProperty("syncAggregate", try env.createBigintUint64(rewards.sync_aggregate));
-    try obj.setNamedProperty("proposerSlashings", try env.createBigintUint64(rewards.proposer_slashings));
-    try obj.setNamedProperty("attesterSlashings", try env.createBigintUint64(rewards.attester_slashings));
+    try obj.setNamedProperty("total", try env.createInt64(@intCast(rewards.total)));
+    try obj.setNamedProperty("attestations", try env.createInt64(@intCast(rewards.attestations)));
+    try obj.setNamedProperty("syncAggregate", try env.createInt64(@intCast(rewards.sync_aggregate)));
+    try obj.setNamedProperty("proposerSlashings", try env.createInt64(@intCast(rewards.proposer_slashings)));
+    try obj.setNamedProperty("attesterSlashings", try env.createInt64(@intCast(rewards.attester_slashings)));
     return obj;
 }
 
@@ -725,7 +716,7 @@ pub fn BeaconStateView_computeSyncCommitteeRewards(env: napi.Env, cb: napi.Callb
     for (rewards.items, 0..) |reward, i| {
         const obj = try env.createObject();
         try obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(reward.validator_index)));
-        try obj.setNamedProperty("reward", try env.createBigintInt64(reward.reward));
+        try obj.setNamedProperty("reward", try env.createInt64(reward.reward));
         try arr.setElement(@intCast(i), obj);
     }
     return arr;
@@ -746,12 +737,12 @@ pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.Callba
     const ideal_arr = try env.createArrayWithLength(rewards.ideal_rewards.items.len);
     for (rewards.ideal_rewards.items, 0..) |ideal, i| {
         const obj = try env.createObject();
-        try obj.setNamedProperty("effectiveBalance", try env.createBigintUint64(ideal.effective_balance));
-        try obj.setNamedProperty("head", try env.createBigintUint64(ideal.head));
-        try obj.setNamedProperty("target", try env.createBigintUint64(ideal.target));
-        try obj.setNamedProperty("source", try env.createBigintUint64(ideal.source));
-        try obj.setNamedProperty("inclusionDelay", try env.createBigintUint64(ideal.inclusion_delay));
-        try obj.setNamedProperty("inactivity", try env.createBigintUint64(ideal.inactivity));
+        try obj.setNamedProperty("effectiveBalance", try env.createInt64(@intCast(ideal.effective_balance)));
+        try obj.setNamedProperty("head", try env.createInt64(@intCast(ideal.head)));
+        try obj.setNamedProperty("target", try env.createInt64(@intCast(ideal.target)));
+        try obj.setNamedProperty("source", try env.createInt64(@intCast(ideal.source)));
+        try obj.setNamedProperty("inclusionDelay", try env.createInt64(@intCast(ideal.inclusion_delay)));
+        try obj.setNamedProperty("inactivity", try env.createInt64(@intCast(ideal.inactivity)));
         try ideal_arr.setElement(@intCast(i), obj);
     }
 
@@ -760,11 +751,11 @@ pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.Callba
     for (rewards.total_rewards.items, 0..) |total, i| {
         const obj = try env.createObject();
         try obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(total.validator_index)));
-        try obj.setNamedProperty("head", try env.createBigintInt64(total.head));
-        try obj.setNamedProperty("target", try env.createBigintInt64(total.target));
-        try obj.setNamedProperty("source", try env.createBigintInt64(total.source));
-        try obj.setNamedProperty("inclusionDelay", try env.createBigintInt64(total.inclusion_delay));
-        try obj.setNamedProperty("inactivity", try env.createBigintInt64(total.inactivity));
+        try obj.setNamedProperty("head", try env.createInt64(total.head));
+        try obj.setNamedProperty("target", try env.createInt64(total.target));
+        try obj.setNamedProperty("source", try env.createInt64(total.source));
+        try obj.setNamedProperty("inclusionDelay", try env.createInt64(total.inclusion_delay));
+        try obj.setNamedProperty("inactivity", try env.createInt64(total.inactivity));
         try total_arr.setElement(@intCast(i), obj);
     }
 
