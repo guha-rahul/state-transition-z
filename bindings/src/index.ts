@@ -64,6 +64,43 @@ interface ProposerRewards {
   slashing: bigint;
 }
 
+interface BlockRewards {
+  proposerIndex: number;
+  total: bigint;
+  attestations: bigint;
+  syncAggregate: bigint;
+  proposerSlashings: bigint;
+  attesterSlashings: bigint;
+}
+
+interface SyncCommitteeReward {
+  validatorIndex: number;
+  reward: bigint;
+}
+
+interface IdealAttestationsReward {
+  effectiveBalance: bigint;
+  head: bigint;
+  target: bigint;
+  source: bigint;
+  inclusionDelay: bigint;
+  inactivity: bigint;
+}
+
+interface TotalAttestationsReward {
+  validatorIndex: number;
+  head: bigint;
+  target: bigint;
+  source: bigint;
+  inclusionDelay: bigint;
+  inactivity: bigint;
+}
+
+interface AttestationsRewards {
+  idealRewards: IdealAttestationsReward[];
+  totalRewards: TotalAttestationsReward[];
+}
+
 interface SyncCommitteeCache {
   validatorIndices: number[];
 }
@@ -205,6 +242,9 @@ declare class BeaconStateView {
 
   // stateTransition(signedBlockBytes: Uint8Array): BeaconStateView;
   processSlots(slot: number, options?: ProcessSlotsOpts): BeaconStateView;
+  computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
+  computeSyncCommitteeRewards(fork: string, signedBlockBytes: Uint8Array): SyncCommitteeReward[];
+  computeAttestationsRewards(): AttestationsRewards;
 }
 
 declare class PublicKey {
