@@ -18,8 +18,10 @@ const Node = @import("persistent_merkle_tree").Node;
 
 pub const WithdrawalsResult = struct {
     withdrawals: Withdrawals,
-    sampled_validators: usize = 0,
+    processed_builder_withdrawals_count: usize = 0,
     processed_partial_withdrawals_count: usize = 0,
+    processed_builders_sweep_count: usize = 0,
+    processed_validator_sweep_count: usize = 0,
 };
 
 /// right now for the implementation we pass in processBlock()
@@ -213,7 +215,7 @@ pub fn getExpectedWithdrawals(
 
     try state.setNextWithdrawalIndex(withdrawal_index);
 
-    withdrawals_result.sampled_validators = n;
+    withdrawals_result.processed_validator_sweep_count = n;
     withdrawals_result.processed_partial_withdrawals_count = processed_partial_withdrawals_count;
 }
 const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;

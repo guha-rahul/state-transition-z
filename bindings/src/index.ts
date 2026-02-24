@@ -58,6 +58,21 @@ interface CompactMultiProof {
   descriptor: Uint8Array;
 }
 
+interface Withdrawal {
+  index: bigint;
+  validatorIndex: number;
+  address: Uint8Array;
+  amount: bigint;
+}
+
+interface ExpectedWithdrawalsResult {
+  expectedWithdrawals: Withdrawal[];
+  processedBuilderWithdrawalsCount: number;
+  processedPartialWithdrawalsCount: number;
+  processedBuildersSweepCount: number;
+  processedValidatorSweepCount: number;
+}
+
 interface ProposerRewards {
   attestations: bigint;
   syncAggregate: bigint;
@@ -167,7 +182,7 @@ declare class BeaconStateView {
   // TODO remove
   isExecutionEnabled(fork: string, signedBlockBytes: Uint8Array): boolean;
 
-  // getExpectedWithdrawals(): ExpectedWithdrawals;
+  getExpectedWithdrawals(): ExpectedWithdrawalsResult;
 
   proposerRewards: ProposerRewards;
   // computeBlockRewards(block: BeaconBlock, proposerRewards: RewardsCache): BlockRewards;

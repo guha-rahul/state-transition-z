@@ -14,6 +14,8 @@ const config = @import("./config.zig");
 const pubkey = @import("./pubkeys.zig");
 const sszValueToNapiValue = @import("./to_napi_value.zig").sszValueToNapiValue;
 const numberSliceToNapiValue = @import("./to_napi_value.zig").numberSliceToNapiValue;
+const getExpectedWithdrawals = st.getExpectedWithdrawals;
+const WithdrawalsResult = st.WithdrawalsResult;
 
 const getter = @import("napi_property_descriptor.zig").getter;
 const method = @import("napi_property_descriptor.zig").method;
@@ -629,7 +631,56 @@ pub fn BeaconStateView_isMergeTransitionComplete(env: napi.Env, cb: napi.Callbac
     return env.getBoolean(result);
 }
 
-// pub fn BeaconStateView_getExpectedWithdrawals
+/// Get the expected withdrawals for the state.
+pub fn BeaconStateView_getExpectedWithdrawals(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var withdrawals_result = WithdrawalsResult{ .withdrawals = .{} };
+
+    const ValidatorIndex = ct.primitive.ValidatorIndex.Type;
+    var withdrawal_balances = std.AutoHashMap(ValidatorIndex, usize).init(allocator);
+    defer withdrawal_balances.deinit();
+
+    switch (cached_state.state.forkSeq()) {
+        inline else => |f| {
+            getExpectedWithdrawals(
+                f,
+                allocator,
+                cached_state.epoch_cache,
+                cached_state.state.castToFork(f),
+                &withdrawals_result,
+                &withdrawal_balances,
+            ) catch |err| {
+                try env.throwError("GET_WITHDRAWALS_ERROR", @errorName(err));
+                return env.getNull();
+            };
+        },
+    }
+    defer withdrawals_result.withdrawals.deinit(allocator);
+
+    // Create the withdrawals array
+    const withdrawals_arr = try env.createArray();
+    for (withdrawals_result.withdrawals.items, 0..) |withdrawal, i| {
+        const w_obj = try env.createObject();
+        try w_obj.setNamedProperty("index", try env.createBigintUint64(withdrawal.index));
+        try w_obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(withdrawal.validator_index)));
+        var addr_bytes: [*]u8 = undefined;
+        const addr_buf = try env.createArrayBuffer(20, &addr_bytes);
+        @memcpy(addr_bytes[0..20], &withdrawal.address);
+        try w_obj.setNamedProperty("address", try env.createTypedarray(.uint8, 20, addr_buf, 0));
+        try w_obj.setNamedProperty("amount", try env.createBigintUint64(withdrawal.amount));
+        try withdrawals_arr.setElement(@intCast(i), w_obj);
+    }
+
+    const result = try env.createObject();
+    try result.setNamedProperty("expectedWithdrawals", withdrawals_arr);
+    try result.setNamedProperty("processedBuilderWithdrawalsCount", try env.createInt64(@intCast(withdrawals_result.processed_builder_withdrawals_count)));
+    try result.setNamedProperty("processedPartialWithdrawalsCount", try env.createInt64(@intCast(withdrawals_result.processed_partial_withdrawals_count)));
+    try result.setNamedProperty("processedBuildersSweepCount", try env.createInt64(@intCast(withdrawals_result.processed_builders_sweep_count)));
+    try result.setNamedProperty("processedValidatorSweepCount", try env.createInt64(@intCast(withdrawals_result.processed_validator_sweep_count)));
+
+    return result;
+}
 
 /// Get the proposer rewards for the state.
 pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
@@ -1047,7 +1098,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_isExecutionStateType),
             method(2, BeaconStateView_isExecutionEnabled),
 
-            // method(0, BeaconStateView_getExpectedWithdrawals),
+            method(0, BeaconStateView_getExpectedWithdrawals),
 
             getter(BeaconStateView_proposerRewards),
             // method(2, BeaconStateView_computeBlockRewards),
