@@ -79,6 +79,7 @@ printDuration("pendingConsolidationsCount", () => state.pendingConsolidationsCou
 printDuration("clonedCount", () => state.clonedCount);
 printDuration("clonedCountWithTransferCache", () => state.clonedCountWithTransferCache);
 printDuration("createdWithTransferCache", () => state.createdWithTransferCache);
+printDuration("isStateValidatorsNodesPopulated", () => state.isStateValidatorsNodesPopulated);
 printDuration("serializeValidators", () => state.serializeValidators());
 printDuration("serializedValidatorsSize", () => state.serializedValidatorsSize());
 printDuration("serializeValidatorsToBytes", () => {

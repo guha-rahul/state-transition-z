@@ -1015,7 +1015,10 @@ pub fn BeaconStateView_createdWithTransferCache(env: napi.Env, cb: napi.Callback
     return try env.getBoolean(cached_state.created_with_transfer_cache);
 }
 
-// pub fn BeaconStateView_isStateValidatorsNodesPopulated
+pub fn BeaconStateView_isStateValidatorsNodesPopulated(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    return try env.getBoolean(cached_state.created_with_transfer_cache);
+}
 
 // pub fn BeaconStateView_loadOtherState
 
@@ -1218,7 +1221,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_clonedCount),
             getter(BeaconStateView_clonedCountWithTransferCache),
             getter(BeaconStateView_createdWithTransferCache),
-            // getter(BeaconStateView_isStateValidatorsNodesPopulated),
+            getter(BeaconStateView_isStateValidatorsNodesPopulated),
 
             // method(2, BeaconStateView_loadOtherState),
             method(0, BeaconStateView_serialize),
