@@ -92,6 +92,11 @@ interface BlockRewards {
   attesterSlashings: number;
 }
 
+interface SyncCommitteeReward {
+  validatorIndex: number;
+  reward: number;
+}
+
 interface HistoricalSummary {
   blockSummaryRoot: Uint8Array;
   stateSummaryRoot: Uint8Array;
@@ -196,7 +201,7 @@ declare class BeaconStateView {
   proposerRewards: ProposerRewards;
   computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
   // computeAttestationRewards(validatorIds?: (number | string)[]): AttestationRewards;
-  // computeSyncCommitteeRewards(block: BeaconBlock, validatorIds?: (number | string)[]): SyncCommitteeRewards;
+  computeSyncCommitteeRewards(fork: string, signedBlockBytes: Uint8Array): SyncCommitteeReward[];
   // getLatestWeakSubjectivityCheckpointEpoch(): number;
 
   getVoluntaryExitValidity(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): VoluntaryExitValidity;

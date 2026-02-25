@@ -134,6 +134,11 @@ if (blockBytes) {
     console.log(`  proposerIndex: ${rewards.proposerIndex}, total: ${rewards.total}`);
     return rewards;
   });
+  printDuration("computeSyncCommitteeRewards", () => {
+    const rewards = state.computeSyncCommitteeRewards("fulu", blockBytes);
+    console.log(`  ${rewards.length} validators in sync committee`);
+    return rewards;
+  });
 }
 
 printDuration("processSlots", () => state.processSlots(state.slot + 1));

@@ -18,6 +18,8 @@ const getExpectedWithdrawals = st.getExpectedWithdrawals;
 const WithdrawalsResult = st.WithdrawalsResult;
 const computeBlockRewardsFn = st.computeBlockRewards;
 const BlockRewards = st.BlockRewards;
+const computeSyncCommitteeRewardsFn = st.computeSyncCommitteeRewards;
+const SyncCommitteeReward = st.SyncCommitteeReward;
 
 const getter = @import("napi_property_descriptor.zig").getter;
 const method = @import("napi_property_descriptor.zig").method;
@@ -735,7 +737,34 @@ pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(
 
 // pub fn BeaconStateView_computeAttestationRewards
 
-// pub fn BeaconStateView_computeSyncCommitteeRewards
+pub fn BeaconStateView_computeSyncCommitteeRewards(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var fork_name_buf: [16]u8 = undefined;
+    const fork_name = try cb.arg(0).getValueStringUtf8(&fork_name_buf);
+    const fork = c.ForkSeq.fromName(fork_name);
+
+    const bytes_info = try cb.arg(1).getTypedarrayInfo();
+
+    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, fork, bytes_info.data);
+    defer signed_block.deinit(allocator);
+
+    const block = signed_block.beaconBlock();
+    var rewards = computeSyncCommitteeRewardsFn(allocator, cached_state, block, &.{}) catch |err| {
+        try env.throwError("SYNC_COMMITTEE_REWARDS_ERROR", @errorName(err));
+        return env.getNull();
+    };
+    defer rewards.deinit();
+
+    const arr = try env.createArrayWithLength(rewards.items.len);
+    for (rewards.items, 0..) |reward, i| {
+        const obj = try env.createObject();
+        try obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(reward.validator_index)));
+        try obj.setNamedProperty("reward", try env.createInt64(reward.reward));
+        try arr.setElement(@intCast(i), obj);
+    }
+    return arr;
+}
 
 // pub fn BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch
 
@@ -1131,7 +1160,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_proposerRewards),
             method(2, BeaconStateView_computeBlockRewards),
             // method(2, BeaconStateView_computeAttestationRewards),
-            // method(2, BeaconStateView_computeSyncCommitteeRewards),
+            method(2, BeaconStateView_computeSyncCommitteeRewards),
             // method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),
 
             method(2, BeaconStateView_getVoluntaryExitValidity),
