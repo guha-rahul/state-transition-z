@@ -62,6 +62,11 @@ printDuration("get previousDecisionRoot", () => state.previousDecisionRoot);
 printDuration("get currentDecisionRoot", () => state.currentDecisionRoot);
 printDuration("get nextDecisionRoot", () => state.nextDecisionRoot);
 printDuration("getShufflingDecisionRoot(state.epoch)", () => state.getShufflingDecisionRoot(state.epoch));
+printDuration("getShufflingAtEpoch(state.epoch)", () => {
+  const shuffling = state.getShufflingAtEpoch(state.epoch);
+  console.log(`  epoch: ${shuffling.epoch}, activeIndices: ${shuffling.activeIndices.length}, committeesPerSlot: ${shuffling.committeesPerSlot}`);
+  return shuffling;
+});
 printDuration("previousProposers", () => state.previousProposers);
 printDuration("currentProposers", () => state.currentProposers);
 printDuration("nextProposers", () => state.nextProposers);

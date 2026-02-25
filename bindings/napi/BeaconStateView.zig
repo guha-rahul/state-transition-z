@@ -352,7 +352,49 @@ pub fn BeaconStateView_proposerLookahead(env: napi.Env, cb: napi.CallbackInfo(0)
 
 // pub fn BeaconStateView_executionPayloadAvailability
 
-// pub fn BeaconStateView_getShufflingAtEpoch
+pub fn BeaconStateView_getShufflingAtEpoch(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const epoch: u64 = @intCast(try cb.arg(0).getValueInt64());
+
+    const shuffling = cached_state.epoch_cache.getShufflingAtEpochOrNull(epoch) orelse {
+        try env.throwError("STATE_ERROR", "No shuffling available for the requested epoch");
+        return env.getNull();
+    };
+
+    const result = try env.createObject();
+
+    // epoch
+    try result.setNamedProperty("epoch", try env.createInt64(@intCast(shuffling.epoch)));
+
+    // activeIndices → Uint32Array
+    try result.setNamedProperty(
+        "activeIndices",
+        try numberSliceToNapiValue(env, u64, shuffling.active_indices, .{ .typed_array = .uint32 }),
+    );
+
+    // shuffling → Uint32Array
+    try result.setNamedProperty(
+        "shuffling",
+        try numberSliceToNapiValue(env, u64, shuffling.shuffling, .{ .typed_array = .uint32 }),
+    );
+
+    // committeesPerSlot
+    try result.setNamedProperty("committeesPerSlot", try env.createInt64(@intCast(shuffling.committees_per_slot)));
+
+    // committees → Array<Array<Uint32Array>>
+    const slots_arr = try env.createArrayWithLength(preset.SLOTS_PER_EPOCH);
+    for (shuffling.committees, 0..) |slot_committees, slot_idx| {
+        const committees_arr = try env.createArrayWithLength(slot_committees.len);
+        for (slot_committees, 0..) |committee, committee_idx| {
+            const committee_napi = try numberSliceToNapiValue(env, u64, committee, .{ .typed_array = .uint32 });
+            try committees_arr.setElement(@intCast(committee_idx), committee_napi);
+        }
+        try slots_arr.setElement(@intCast(slot_idx), committees_arr);
+    }
+    try result.setNamedProperty("committees", slots_arr);
+
+    return result;
+}
 
 /// Get the previous decision root for the state.
 pub fn BeaconStateView_previousDecisionRoot(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
@@ -1173,7 +1215,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_proposerLookahead),
             // getter(BeaconStateView_executionPayloadAvailability),
 
-            // method(1, BeaconStateView_getShufflingAtEpoch),
+            method(1, BeaconStateView_getShufflingAtEpoch),
             getter(BeaconStateView_previousDecisionRoot),
             getter(BeaconStateView_currentDecisionRoot),
             getter(BeaconStateView_nextDecisionRoot),

@@ -79,6 +79,14 @@ interface ProposerRewards {
   slashing: bigint;
 }
 
+interface EpochShuffling {
+  epoch: number;
+  activeIndices: Uint32Array;
+  shuffling: Uint32Array;
+  committeesPerSlot: number;
+  committees: Uint32Array[][];
+}
+
 interface SyncCommitteeCache {
   validatorIndices: number[];
 }
@@ -189,7 +197,7 @@ declare class BeaconStateView {
   proposerLookahead: Uint32Array;
   // executionPayloadAvailability: boolean[];
 
-  // getShufflingAtEpoch(epoch: number): EpochShuffling;
+  getShufflingAtEpoch(epoch: number): EpochShuffling;
   previousDecisionRoot: Uint8Array;
   currentDecisionRoot: Uint8Array;
   nextDecisionRoot: Uint8Array;
