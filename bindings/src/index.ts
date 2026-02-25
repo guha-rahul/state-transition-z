@@ -59,10 +59,10 @@ interface CompactMultiProof {
 }
 
 interface Withdrawal {
-  index: bigint;
+  index: number;
   validatorIndex: number;
   address: Uint8Array;
-  amount: bigint;
+  amount: number;
 }
 
 interface ExpectedWithdrawalsResult {
@@ -81,6 +81,15 @@ interface ProposerRewards {
 
 interface SyncCommitteeCache {
   validatorIndices: number[];
+}
+
+interface BlockRewards {
+  proposerIndex: number;
+  total: number;
+  attestations: number;
+  syncAggregate: number;
+  proposerSlashings: number;
+  attesterSlashings: number;
 }
 
 interface HistoricalSummary {
@@ -185,7 +194,7 @@ declare class BeaconStateView {
   getExpectedWithdrawals(): ExpectedWithdrawalsResult;
 
   proposerRewards: ProposerRewards;
-  // computeBlockRewards(block: BeaconBlock, proposerRewards: RewardsCache): BlockRewards;
+  computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
   // computeAttestationRewards(validatorIds?: (number | string)[]): AttestationRewards;
   // computeSyncCommitteeRewards(block: BeaconBlock, validatorIds?: (number | string)[]): SyncCommitteeRewards;
   // getLatestWeakSubjectivityCheckpointEpoch(): number;

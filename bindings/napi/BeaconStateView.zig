@@ -16,6 +16,8 @@ const sszValueToNapiValue = @import("./to_napi_value.zig").sszValueToNapiValue;
 const numberSliceToNapiValue = @import("./to_napi_value.zig").numberSliceToNapiValue;
 const getExpectedWithdrawals = st.getExpectedWithdrawals;
 const WithdrawalsResult = st.WithdrawalsResult;
+const computeBlockRewardsFn = st.computeBlockRewards;
+const BlockRewards = st.BlockRewards;
 
 const getter = @import("napi_property_descriptor.zig").getter;
 const method = @import("napi_property_descriptor.zig").method;
@@ -662,13 +664,13 @@ pub fn BeaconStateView_getExpectedWithdrawals(env: napi.Env, cb: napi.CallbackIn
     const withdrawals_arr = try env.createArray();
     for (withdrawals_result.withdrawals.items, 0..) |withdrawal, i| {
         const w_obj = try env.createObject();
-        try w_obj.setNamedProperty("index", try env.createBigintUint64(withdrawal.index));
+        try w_obj.setNamedProperty("index", try env.createInt64(@intCast(withdrawal.index)));
         try w_obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(withdrawal.validator_index)));
         var addr_bytes: [*]u8 = undefined;
         const addr_buf = try env.createArrayBuffer(20, &addr_bytes);
         @memcpy(addr_bytes[0..20], &withdrawal.address);
         try w_obj.setNamedProperty("address", try env.createTypedarray(.uint8, 20, addr_buf, 0));
-        try w_obj.setNamedProperty("amount", try env.createBigintUint64(withdrawal.amount));
+        try w_obj.setNamedProperty("amount", try env.createInt64(@intCast(withdrawal.amount)));
         try withdrawals_arr.setElement(@intCast(i), w_obj);
     }
 
@@ -703,7 +705,33 @@ pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) 
     return obj;
 }
 
-// pub fn BeaconStateView_computeBlockRewards
+pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var fork_name_buf: [16]u8 = undefined;
+    const fork_name = try cb.arg(0).getValueStringUtf8(&fork_name_buf);
+    const fork = c.ForkSeq.fromName(fork_name);
+
+    const bytes_info = try cb.arg(1).getTypedarrayInfo();
+
+    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, fork, bytes_info.data);
+    defer signed_block.deinit(allocator);
+
+    const block = signed_block.beaconBlock();
+    const rewards = computeBlockRewardsFn(allocator, cached_state, block) catch |err| {
+        try env.throwError("BLOCK_REWARDS_ERROR", @errorName(err));
+        return env.getNull();
+    };
+
+    const obj = try env.createObject();
+    try obj.setNamedProperty("proposerIndex", try env.createInt64(@intCast(rewards.proposer_index)));
+    try obj.setNamedProperty("total", try env.createInt64(@intCast(rewards.total)));
+    try obj.setNamedProperty("attestations", try env.createInt64(@intCast(rewards.attestations)));
+    try obj.setNamedProperty("syncAggregate", try env.createInt64(@intCast(rewards.sync_aggregate)));
+    try obj.setNamedProperty("proposerSlashings", try env.createInt64(@intCast(rewards.proposer_slashings)));
+    try obj.setNamedProperty("attesterSlashings", try env.createInt64(@intCast(rewards.attester_slashings)));
+    return obj;
+}
 
 // pub fn BeaconStateView_computeAttestationRewards
 
@@ -1101,7 +1129,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             method(0, BeaconStateView_getExpectedWithdrawals),
 
             getter(BeaconStateView_proposerRewards),
-            // method(2, BeaconStateView_computeBlockRewards),
+            method(2, BeaconStateView_computeBlockRewards),
             // method(2, BeaconStateView_computeAttestationRewards),
             // method(2, BeaconStateView_computeSyncCommitteeRewards),
             // method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),

@@ -42,6 +42,8 @@ if (hasPkix) {
 const reader = await printDurationAsync("load era reader", () => era.era.EraReader.open(config, getFirstEraFilePath()));
 
 const stateBytes = await printDurationAsync("read serialized state", () => reader.readSerializedState());
+const blockSlot = reader.eraNumber * 8192 - 1;
+const blockBytes = await printDurationAsync("read serialized block", () => reader.readSerializedBlock(blockSlot));
 
 const state = printDuration("create state view", () => bindings.BeaconStateView.createFromBytes(stateBytes));
 
@@ -125,4 +127,13 @@ printDuration("serializeToBytes", () => {
 printDuration("hashTreeRoot", () => state.hashTreeRoot());
 printDuration("proposerRewards", () => state.proposerRewards);
 printDuration("getExpectedWithdrawals()", () => state.getExpectedWithdrawals());
+
+if (blockBytes) {
+  printDuration("computeBlockRewards", () => {
+    const rewards = state.computeBlockRewards("fulu", blockBytes);
+    console.log(`  proposerIndex: ${rewards.proposerIndex}, total: ${rewards.total}`);
+    return rewards;
+  });
+}
+
 printDuration("processSlots", () => state.processSlots(state.slot + 1));
