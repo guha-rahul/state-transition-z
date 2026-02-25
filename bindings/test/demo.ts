@@ -152,4 +152,6 @@ if (blockBytes) {
   });
 }
 
+printDuration("getLatestWeakSubjectivityCheckpointEpoch()", () => state.getLatestWeakSubjectivityCheckpointEpoch());
+
 printDuration("processSlots", () => state.processSlots(state.slot + 1));

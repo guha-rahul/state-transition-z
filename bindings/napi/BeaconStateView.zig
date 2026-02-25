@@ -850,7 +850,11 @@ pub fn BeaconStateView_computeSyncCommitteeRewards(env: napi.Env, cb: napi.Callb
     return arr;
 }
 
-// pub fn BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch
+pub fn BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+    const epoch = st.getLatestWeakSubjectivityCheckpointEpoch(cached_state.epoch_cache);
+    return try env.createInt64(@intCast(epoch));
+}
 
 /// Get the validity status of a signed voluntary exit.
 pub fn BeaconStateView_getVoluntaryExitValidity(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
@@ -1248,7 +1252,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             method(2, BeaconStateView_computeBlockRewards),
             method(0, BeaconStateView_computeAttestationsRewards),
             method(2, BeaconStateView_computeSyncCommitteeRewards),
-            // method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),
+            method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),
 
             method(2, BeaconStateView_getVoluntaryExitValidity),
             method(2, BeaconStateView_isValidVoluntaryExit),

@@ -233,7 +233,7 @@ declare class BeaconStateView {
   computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
   computeAttestationsRewards(): AttestationsRewards;
   computeSyncCommitteeRewards(fork: string, signedBlockBytes: Uint8Array): SyncCommitteeReward[];
-  // getLatestWeakSubjectivityCheckpointEpoch(): number;
+  getLatestWeakSubjectivityCheckpointEpoch(): number;
 
   getVoluntaryExitValidity(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): VoluntaryExitValidity;
   isValidVoluntaryExit(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): boolean;

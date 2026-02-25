@@ -92,6 +92,7 @@ pub const isExecutionEnabled = @import("./utils/execution.zig").isExecutionEnabl
 pub const isMergeTransitionComplete = @import("./utils/execution.zig").isMergeTransitionComplete;
 pub const getRandaoMix = @import("./utils/seed.zig").getRandaoMix;
 pub const getEffectiveBalanceIncrementsZeroInactive = @import("./utils/balance.zig").getEffectiveBalanceIncrementsZeroInactive;
+pub const getLatestWeakSubjectivityCheckpointEpoch = @import("./utils/weak_subjectivity.zig").getLatestWeakSubjectivityCheckpointEpoch;
 
 pub const WithdrawalsResult = @import("./block/process_withdrawals.zig").WithdrawalsResult;
 
