@@ -97,6 +97,29 @@ interface SyncCommitteeReward {
   reward: number;
 }
 
+interface IdealAttestationsReward {
+  effectiveBalance: number;
+  head: number;
+  target: number;
+  source: number;
+  inclusionDelay: number;
+  inactivity: number;
+}
+
+interface TotalAttestationsReward {
+  validatorIndex: number;
+  head: number;
+  target: number;
+  source: number;
+  inclusionDelay: number;
+  inactivity: number;
+}
+
+interface AttestationsRewards {
+  idealRewards: IdealAttestationsReward[];
+  totalRewards: TotalAttestationsReward[];
+}
+
 interface HistoricalSummary {
   blockSummaryRoot: Uint8Array;
   stateSummaryRoot: Uint8Array;
@@ -200,7 +223,7 @@ declare class BeaconStateView {
 
   proposerRewards: ProposerRewards;
   computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
-  // computeAttestationRewards(validatorIds?: (number | string)[]): AttestationRewards;
+  computeAttestationsRewards(): AttestationsRewards;
   computeSyncCommitteeRewards(fork: string, signedBlockBytes: Uint8Array): SyncCommitteeReward[];
   // getLatestWeakSubjectivityCheckpointEpoch(): number;
 

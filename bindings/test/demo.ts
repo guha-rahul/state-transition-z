@@ -127,6 +127,11 @@ printDuration("serializeToBytes", () => {
 printDuration("hashTreeRoot", () => state.hashTreeRoot());
 printDuration("proposerRewards", () => state.proposerRewards);
 printDuration("getExpectedWithdrawals()", () => state.getExpectedWithdrawals());
+printDuration("computeAttestationsRewards", () => {
+  const rewards = state.computeAttestationsRewards();
+  console.log(`  idealRewards: ${rewards.idealRewards.length}, totalRewards: ${rewards.totalRewards.length}`);
+  return rewards;
+});
 
 if (blockBytes) {
   printDuration("computeBlockRewards", () => {

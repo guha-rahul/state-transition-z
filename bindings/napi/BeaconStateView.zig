@@ -20,6 +20,8 @@ const computeBlockRewardsFn = st.computeBlockRewards;
 const BlockRewards = st.BlockRewards;
 const computeSyncCommitteeRewardsFn = st.computeSyncCommitteeRewards;
 const SyncCommitteeReward = st.SyncCommitteeReward;
+const computeAttestationsRewardsFn = st.computeAttestationsRewards;
+const AttestationsRewards = st.AttestationsRewards;
 
 const getter = @import("napi_property_descriptor.zig").getter;
 const method = @import("napi_property_descriptor.zig").method;
@@ -735,7 +737,47 @@ pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(
     return obj;
 }
 
-// pub fn BeaconStateView_computeAttestationRewards
+pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var rewards = computeAttestationsRewardsFn(allocator, cached_state, &.{}) catch |err| {
+        try env.throwError("ATTESTATIONS_REWARDS_ERROR", @errorName(err));
+        return env.getNull();
+    };
+    defer rewards.deinit();
+
+    // Create idealRewards array
+    const ideal_arr = try env.createArrayWithLength(rewards.ideal_rewards.items.len);
+    for (rewards.ideal_rewards.items, 0..) |ideal, i| {
+        const obj = try env.createObject();
+        try obj.setNamedProperty("effectiveBalance", try env.createInt64(@intCast(ideal.effective_balance)));
+        try obj.setNamedProperty("head", try env.createInt64(@intCast(ideal.head)));
+        try obj.setNamedProperty("target", try env.createInt64(@intCast(ideal.target)));
+        try obj.setNamedProperty("source", try env.createInt64(@intCast(ideal.source)));
+        try obj.setNamedProperty("inclusionDelay", try env.createInt64(@intCast(ideal.inclusion_delay)));
+        try obj.setNamedProperty("inactivity", try env.createInt64(@intCast(ideal.inactivity)));
+        try ideal_arr.setElement(@intCast(i), obj);
+    }
+
+    // Create totalRewards array
+    const total_arr = try env.createArrayWithLength(rewards.total_rewards.items.len);
+    for (rewards.total_rewards.items, 0..) |total, i| {
+        const obj = try env.createObject();
+        try obj.setNamedProperty("validatorIndex", try env.createInt64(@intCast(total.validator_index)));
+        try obj.setNamedProperty("head", try env.createInt64(total.head));
+        try obj.setNamedProperty("target", try env.createInt64(total.target));
+        try obj.setNamedProperty("source", try env.createInt64(total.source));
+        try obj.setNamedProperty("inclusionDelay", try env.createInt64(total.inclusion_delay));
+        try obj.setNamedProperty("inactivity", try env.createInt64(total.inactivity));
+        try total_arr.setElement(@intCast(i), obj);
+    }
+
+    // Create result object
+    const result = try env.createObject();
+    try result.setNamedProperty("idealRewards", ideal_arr);
+    try result.setNamedProperty("totalRewards", total_arr);
+    return result;
+}
 
 pub fn BeaconStateView_computeSyncCommitteeRewards(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -1159,7 +1201,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
 
             getter(BeaconStateView_proposerRewards),
             method(2, BeaconStateView_computeBlockRewards),
-            // method(2, BeaconStateView_computeAttestationRewards),
+            method(0, BeaconStateView_computeAttestationsRewards),
             method(2, BeaconStateView_computeSyncCommitteeRewards),
             // method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),
 
