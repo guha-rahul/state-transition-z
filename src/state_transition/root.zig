@@ -93,6 +93,8 @@ pub const isMergeTransitionComplete = @import("./utils/execution.zig").isMergeTr
 pub const getRandaoMix = @import("./utils/seed.zig").getRandaoMix;
 pub const getEffectiveBalanceIncrementsZeroInactive = @import("./utils/balance.zig").getEffectiveBalanceIncrementsZeroInactive;
 pub const getLatestWeakSubjectivityCheckpointEpoch = @import("./utils/weak_subjectivity.zig").getLatestWeakSubjectivityCheckpointEpoch;
+pub const getSyncCommitteesWitness = @import("./utils/sync_committee_witness.zig").getSyncCommitteesWitness;
+pub const SyncCommitteeWitness = @import("./utils/sync_committee_witness.zig").SyncCommitteeWitness;
 
 pub const WithdrawalsResult = @import("./block/process_withdrawals.zig").WithdrawalsResult;
 

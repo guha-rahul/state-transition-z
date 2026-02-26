@@ -118,6 +118,11 @@ printDuration("createMultiProof(descriptor for gindex 42)", () =>
   state.createMultiProof(Uint8Array.from([0x25, 0xe0]))
 );
 printDuration("getFinalizedRootProof()", () => state.getFinalizedRootProof());
+printDuration("getSyncCommitteesWitness()", () => {
+  const witness = state.getSyncCommitteesWitness();
+  console.log(`  witness entries: ${witness.witness.length}, currentRoot: ${witness.currentSyncCommitteeRoot.length}B, nextRoot: ${witness.nextSyncCommitteeRoot.length}B`);
+  return witness;
+});
 printDuration("isExecutionStateType", () => state.isExecutionStateType);
 printDuration("getEffectiveBalanceIncrementsZeroInactive()", () => state.getEffectiveBalanceIncrementsZeroInactive());
 printDuration("computeUnrealizedCheckpoints()", () => state.computeUnrealizedCheckpoints());

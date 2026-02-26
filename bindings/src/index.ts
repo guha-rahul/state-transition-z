@@ -52,6 +52,12 @@ interface ProcessSlotsOpts {
   transferCache?: boolean;
 }
 
+interface SyncCommitteeWitness {
+  witness: Uint8Array[];
+  currentSyncCommitteeRoot: Uint8Array;
+  nextSyncCommitteeRoot: Uint8Array;
+}
+
 interface CompactMultiProof {
   type: "compactMulti";
   leaves: Uint8Array[];
@@ -239,7 +245,7 @@ declare class BeaconStateView {
   isValidVoluntaryExit(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): boolean;
 
   getFinalizedRootProof(): Uint8Array[];
-  // getSyncCommitteesWitness(): SyncCommitteeWitness;
+  getSyncCommitteesWitness(): SyncCommitteeWitness;
   getSingleProof(gindex: number): Uint8Array[];
   // createMultiProof(descriptor: Uint8Array): CompactMultiProof;
 

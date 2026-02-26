@@ -932,7 +932,30 @@ pub fn BeaconStateView_getFinalizedRootProof(env: napi.Env, cb: napi.CallbackInf
     );
 }
 
-// pub fn BeaconStateView_getSyncCommitteesWitness
+pub fn BeaconStateView_getSyncCommitteesWitness(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
+
+    var witness_result = st.getSyncCommitteesWitness(allocator, cached_state.state, &pool.pool) catch |err| {
+        try env.throwError("STATE_ERROR", @errorName(err));
+        return env.getNull();
+    };
+    defer witness_result.deinit();
+
+    const result = try env.createObject();
+
+    // witness array
+    const witness_arr = try env.createArrayWithLength(witness_result.witness.len);
+    for (witness_result.witness, 0..) |*entry, i| {
+        try witness_arr.setElement(@intCast(i), try sszValueToNapiValue(env, ct.primitive.Root, entry));
+    }
+    try result.setNamedProperty("witness", witness_arr);
+
+    // roots
+    try result.setNamedProperty("currentSyncCommitteeRoot", try sszValueToNapiValue(env, ct.primitive.Root, &witness_result.current_sync_committee_root));
+    try result.setNamedProperty("nextSyncCommitteeRoot", try sszValueToNapiValue(env, ct.primitive.Root, &witness_result.next_sync_committee_root));
+
+    return result;
+}
 
 /// Get a single Merkle proof  for a node at the given generalized index.
 pub fn BeaconStateView_getSingleProof(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
@@ -1258,7 +1281,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             method(2, BeaconStateView_isValidVoluntaryExit),
 
             method(0, BeaconStateView_getFinalizedRootProof),
-            // method(1, BeaconStateView_getSyncCommitteesWitness),
+            method(0, BeaconStateView_getSyncCommitteesWitness),
             method(1, BeaconStateView_getSingleProof),
             method(1, BeaconStateView_createMultiProof),
 
