@@ -259,7 +259,7 @@ declare class BeaconStateView {
   createdWithTransferCache: boolean;
   isStateValidatorsNodesPopulated: boolean;
 
-  // loadOtherState(stateBytes: Uint8Array, seedValidatorsBytes?: Uint8Array): void;
+  loadOtherState(stateBytes: Uint8Array, seedValidatorsBytes?: Uint8Array): BeaconStateView;
   serialize(): Uint8Array;
   serializedSize(): number;
   serializeToBytes(output: Uint8Array, offset: number): number;

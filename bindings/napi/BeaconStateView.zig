@@ -1089,7 +1089,49 @@ pub fn BeaconStateView_isStateValidatorsNodesPopulated(env: napi.Env, cb: napi.C
     return try env.getBoolean(cached_state.created_with_transfer_cache);
 }
 
-// pub fn BeaconStateView_loadOtherState
+/// Load another state from serialized bytes, sharing the same pubkey caches.
+/// arg 0: stateBytes (Uint8Array)
+/// arg 1: seedValidatorsBytes (Uint8Array, ignored for now)
+/// Returns: new BeaconStateView
+pub fn BeaconStateView_loadOtherState(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+    const bytes_info = try cb.arg(0).getTypedarrayInfo();
+    if (bytes_info.array_type != .uint8) {
+        try env.throwTypeError("STATE_ERROR", "Expected stateBytes to be a Uint8Array");
+        return env.getNull();
+    }
+
+    const state = try allocator.create(AnyBeaconState);
+    errdefer allocator.destroy(state);
+
+    const slot = fork_types.readSlotFromAnyBeaconStateBytes(bytes_info.data);
+    const fork = config.config.forkSeq(slot);
+    state.* = AnyBeaconState.deserialize(allocator, &pool.pool, fork, bytes_info.data) catch {
+        try env.throwError("STATE_ERROR", "Failed to deserialize state bytes");
+        return env.getNull();
+    };
+    errdefer state.deinit();
+
+    const ctor = try cb.this().getNamedProperty("constructor");
+    const new_state_value = try env.newInstance(ctor, .{});
+
+    const cached_state = try env.unwrap(CachedBeaconState, new_state_value);
+
+    cached_state.init(
+        allocator,
+        state,
+        .{
+            .config = &config.config,
+            .index_to_pubkey = &pubkey.index2pubkey,
+            .pubkey_to_index = &pubkey.pubkey2index,
+        },
+        null,
+    ) catch {
+        try env.throwError("STATE_ERROR", "Failed to initialize cached state");
+        return env.getNull();
+    };
+
+    return new_state_value;
+}
 
 pub fn BeaconStateView_serialize(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
@@ -1292,7 +1334,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_createdWithTransferCache),
             getter(BeaconStateView_isStateValidatorsNodesPopulated),
 
-            // method(2, BeaconStateView_loadOtherState),
+            method(2, BeaconStateView_loadOtherState),
             method(0, BeaconStateView_serialize),
             method(0, BeaconStateView_serializedSize),
             method(2, BeaconStateView_serializeToBytes),

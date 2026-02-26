@@ -137,12 +137,12 @@ printDuration("serializeToBytes", () => {
 });
 printDuration("hashTreeRoot", () => state.hashTreeRoot());
 printDuration("proposerRewards", () => state.proposerRewards);
-printDuration("getExpectedWithdrawals()", () => state.getExpectedWithdrawals());
 printDuration("computeAttestationsRewards", () => {
   const rewards = state.computeAttestationsRewards();
   console.log(`  idealRewards: ${rewards.idealRewards.length}, totalRewards: ${rewards.totalRewards.length}`);
   return rewards;
 });
+printDuration("getExpectedWithdrawals()", () => state.getExpectedWithdrawals());
 
 if (blockBytes) {
   printDuration("computeBlockRewards", () => {
@@ -158,5 +158,11 @@ if (blockBytes) {
 }
 
 printDuration("getLatestWeakSubjectivityCheckpointEpoch()", () => state.getLatestWeakSubjectivityCheckpointEpoch());
+
+printDuration("loadOtherState", () => {
+  const otherState = state.loadOtherState(stateBytes);
+  console.log(`  loaded other state at slot ${otherState.slot}`);
+  return otherState;
+});
 
 printDuration("processSlots", () => state.processSlots(state.slot + 1));
