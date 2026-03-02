@@ -7,6 +7,7 @@ const types = @import("consensus_types");
 const preset = @import("preset").preset;
 const findAttesterSlashableIndices = @import("../utils/attestation.zig").findAttesterSlashableIndices;
 const processAttestationsAltair = @import("./process_attestation_altair.zig").processAttestationsAltair;
+const getBeaconProposer = @import("../cache/get_beacon_proposer.zig").getBeaconProposer;
 
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 
@@ -35,8 +36,12 @@ pub fn computeBlockRewards(allocator: Allocator, cached_state: *CachedBeaconStat
         if (fork_seq == .phase0) {
             return error.UnsupportedFork;
         }
-        //note
-        attestations_reward = try computeBlockAttestationRewardAltair(allocator, cached_state, block);
+        const clone = try cached_state.clone(allocator, .{});
+        defer {
+            clone.deinit();
+            allocator.destroy(clone);
+        }
+        attestations_reward = try computeBlockAttestationRewardAltair(allocator, clone, block);
     }
 
     var sync_aggregate_reward = proposer_rewards.sync_aggregate;
@@ -66,20 +71,27 @@ fn computeBlockAttestationRewardAltair(allocator: Allocator, cached_state: *Cach
     const config = cached_state.config;
     const epoch_cache = cached_state.epoch_cache;
     const attestations = block.beaconBlockBody().attestations();
-
     switch (fork_seq) {
         inline .altair, .bellatrix, .capella, .deneb => |fork| {
             const state = try cached_state.state.tryCastToFork(fork);
+            const proposer_index = try getBeaconProposer(fork, epoch_cache, state, try state.slot());
+            var balances = try state.balances();
+            const balance_before = try balances.get(proposer_index);
             try processAttestationsAltair(fork, allocator, config, epoch_cache, state, &cached_state.slashings_cache, attestations.phase0.items, false);
+            balances = try state.balances();
+            return (try balances.get(proposer_index)) - balance_before;
         },
         inline .electra, .fulu => |fork| {
             const state = try cached_state.state.tryCastToFork(fork);
+            const proposer_index = try getBeaconProposer(fork, epoch_cache, state, try state.slot());
+            var balances = try state.balances();
+            const balance_before = try balances.get(proposer_index);
             try processAttestationsAltair(fork, allocator, config, epoch_cache, state, &cached_state.slashings_cache, attestations.electra.items, false);
+            balances = try state.balances();
+            return (try balances.get(proposer_index)) - balance_before;
         },
         else => return error.UnsupportedFork,
     }
-
-    return cached_state.proposer_rewards.attestations;
 }
 
 /// Calculate rewards received by block proposer for including sync aggregate.
