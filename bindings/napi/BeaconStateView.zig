@@ -30,6 +30,20 @@ const method = @import("napi_property_descriptor.zig").method;
 var gpa: std.heap.DebugAllocator(.{}) = .init;
 const allocator = gpa.allocator();
 
+fn parseValidatorIds(arg: ?napi.Value) !struct { buf: []u64, allocated: bool } {
+    const ids_arg = arg orelse return .{ .buf = &.{}, .allocated = false };
+    if (try ids_arg.typeof() != .object) return .{ .buf = &.{}, .allocated = false };
+    if (!try ids_arg.isArray()) return .{ .buf = &.{}, .allocated = false };
+    const len = try ids_arg.getArrayLength();
+    if (len == 0) return .{ .buf = &.{}, .allocated = false };
+    const buf = try allocator.alloc(u64, len);
+    for (0..len) |i| {
+        const elem = try ids_arg.getElement(@intCast(i));
+        buf[i] = @intCast(try elem.getValueUint32());
+    }
+    return .{ .buf = buf, .allocated = true };
+}
+
 pub fn BeaconStateView_finalize(_: napi.Env, cached_state: *CachedBeaconState, _: ?*anyopaque) void {
     cached_state.deinit();
     allocator.destroy(cached_state);
@@ -366,13 +380,11 @@ pub fn BeaconStateView_getShufflingAtEpoch(env: napi.Env, cb: napi.CallbackInfo(
     // epoch
     try result.setNamedProperty("epoch", try env.createInt64(@intCast(shuffling.epoch)));
 
-    // activeIndices → Uint32Array
     try result.setNamedProperty(
         "activeIndices",
         try numberSliceToNapiValue(env, u64, shuffling.active_indices, .{ .typed_array = .uint32 }),
     );
 
-    // shuffling → Uint32Array
     try result.setNamedProperty(
         "shuffling",
         try numberSliceToNapiValue(env, u64, shuffling.shuffling, .{ .typed_array = .uint32 }),
@@ -381,7 +393,6 @@ pub fn BeaconStateView_getShufflingAtEpoch(env: napi.Env, cb: napi.CallbackInfo(
     // committeesPerSlot
     try result.setNamedProperty("committeesPerSlot", try env.createInt64(@intCast(shuffling.committees_per_slot)));
 
-    // committees → Array<Array<Uint32Array>>
     const slots_arr = try env.createArrayWithLength(preset.SLOTS_PER_EPOCH);
     for (shuffling.committees, 0..) |slot_committees, slot_idx| {
         const committees_arr = try env.createArrayWithLength(slot_committees.len);
@@ -575,7 +586,7 @@ pub fn BeaconStateView_getBalance(env: napi.Env, cb: napi.CallbackInfo(1)) !napi
     const index: u64 = @intCast(try cb.arg(0).getValueInt64());
     var balances = try cached_state.state.balances();
     const balance = try balances.get(index);
-    return try env.createBigintUint64(balance);
+    return try env.createInt64(@intCast(balance));
 }
 
 /// Get a validator by index.
@@ -738,29 +749,25 @@ pub fn BeaconStateView_proposerRewards(env: napi.Env, cb: napi.CallbackInfo(0)) 
     const obj = try env.createObject();
     try obj.setNamedProperty(
         "attestations",
-        try env.createBigintUint64(rewards.attestations),
+        try env.createInt64(@intCast(rewards.attestations)),
     );
     try obj.setNamedProperty(
         "syncAggregate",
-        try env.createBigintUint64(rewards.sync_aggregate),
+        try env.createInt64(@intCast(rewards.sync_aggregate)),
     );
     try obj.setNamedProperty(
         "slashing",
-        try env.createBigintUint64(rewards.slashing),
+        try env.createInt64(@intCast(rewards.slashing)),
     );
     return obj;
 }
 
-pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
+pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
-    var fork_name_buf: [16]u8 = undefined;
-    const fork_name = try cb.arg(0).getValueStringUtf8(&fork_name_buf);
-    const fork = c.ForkSeq.fromName(fork_name);
+    const bytes_info = try cb.arg(0).getTypedarrayInfo();
 
-    const bytes_info = try cb.arg(1).getTypedarrayInfo();
-
-    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, fork, bytes_info.data);
+    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, cached_state.state.forkSeq(), bytes_info.data);
     defer signed_block.deinit(allocator);
 
     const block = signed_block.beaconBlock();
@@ -779,10 +786,13 @@ pub fn BeaconStateView_computeBlockRewards(env: napi.Env, cb: napi.CallbackInfo(
     return obj;
 }
 
-pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
+pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.CallbackInfo(1)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
-    var rewards = computeAttestationsRewardsFn(allocator, cached_state, &.{}) catch |err| {
+    const ids = try parseValidatorIds(cb.getArg(0));
+    defer if (ids.allocated) allocator.free(ids.buf);
+
+    var rewards = computeAttestationsRewardsFn(allocator, cached_state, ids.buf) catch |err| {
         try env.throwError("ATTESTATIONS_REWARDS_ERROR", @errorName(err));
         return env.getNull();
     };
@@ -824,17 +834,16 @@ pub fn BeaconStateView_computeAttestationsRewards(env: napi.Env, cb: napi.Callba
 pub fn BeaconStateView_computeSyncCommitteeRewards(env: napi.Env, cb: napi.CallbackInfo(2)) !napi.Value {
     const cached_state = try env.unwrap(CachedBeaconState, cb.this());
 
-    var fork_name_buf: [16]u8 = undefined;
-    const fork_name = try cb.arg(0).getValueStringUtf8(&fork_name_buf);
-    const fork = c.ForkSeq.fromName(fork_name);
+    const bytes_info = try cb.arg(0).getTypedarrayInfo();
 
-    const bytes_info = try cb.arg(1).getTypedarrayInfo();
-
-    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, fork, bytes_info.data);
+    const signed_block = try AnySignedBeaconBlock.deserialize(allocator, .full, cached_state.state.forkSeq(), bytes_info.data);
     defer signed_block.deinit(allocator);
 
+    const ids = try parseValidatorIds(cb.getArg(1));
+    defer if (ids.allocated) allocator.free(ids.buf);
+
     const block = signed_block.beaconBlock();
-    var rewards = computeSyncCommitteeRewardsFn(allocator, cached_state, block, &.{}) catch |err| {
+    var rewards = computeSyncCommitteeRewardsFn(allocator, cached_state, block, ids.buf) catch |err| {
         try env.throwError("SYNC_COMMITTEE_REWARDS_ERROR", @errorName(err));
         return env.getNull();
     };
@@ -1084,9 +1093,11 @@ pub fn BeaconStateView_createdWithTransferCache(env: napi.Env, cb: napi.Callback
     return try env.getBoolean(cached_state.created_with_transfer_cache);
 }
 
-pub fn BeaconStateView_isStateValidatorsNodesPopulated(env: napi.Env, cb: napi.CallbackInfo(0)) !napi.Value {
-    const cached_state = try env.unwrap(CachedBeaconState, cb.this());
-    return try env.getBoolean(cached_state.created_with_transfer_cache);
+pub fn BeaconStateView_isStateValidatorsNodesPopulated(env: napi.Env, _: napi.CallbackInfo(0)) !napi.Value {
+    // In Ts impl, nodesPopulated tracks whether the validators array's internal tree nodes
+    // have been extracted into a flat cache. The Zig PMT has no such lazy cache
+    // tree nodes are always directly accessible via node pointers, so this is always true.
+    return try env.getBoolean(true);
 }
 
 /// Load another state from serialized bytes, sharing the same pubkey caches.
@@ -1314,8 +1325,8 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             method(0, BeaconStateView_getExpectedWithdrawals),
 
             getter(BeaconStateView_proposerRewards),
-            method(2, BeaconStateView_computeBlockRewards),
-            method(0, BeaconStateView_computeAttestationsRewards),
+            method(1, BeaconStateView_computeBlockRewards),
+            method(1, BeaconStateView_computeAttestationsRewards),
             method(2, BeaconStateView_computeSyncCommitteeRewards),
             method(0, BeaconStateView_getLatestWeakSubjectivityCheckpointEpoch),
 
@@ -1332,7 +1343,7 @@ pub fn register(env: napi.Env, exports: napi.Value) !void {
             getter(BeaconStateView_clonedCount),
             getter(BeaconStateView_clonedCountWithTransferCache),
             getter(BeaconStateView_createdWithTransferCache),
-            getter(BeaconStateView_isStateValidatorsNodesPopulated),
+            method(0, BeaconStateView_isStateValidatorsNodesPopulated),
 
             method(2, BeaconStateView_loadOtherState),
             method(0, BeaconStateView_serialize),
