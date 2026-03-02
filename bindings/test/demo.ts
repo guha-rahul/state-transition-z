@@ -84,7 +84,7 @@ printDuration("pendingConsolidationsCount", () => state.pendingConsolidationsCou
 printDuration("clonedCount", () => state.clonedCount);
 printDuration("clonedCountWithTransferCache", () => state.clonedCountWithTransferCache);
 printDuration("createdWithTransferCache", () => state.createdWithTransferCache);
-printDuration("isStateValidatorsNodesPopulated", () => state.isStateValidatorsNodesPopulated);
+printDuration("isStateValidatorsNodesPopulated", () => state.isStateValidatorsNodesPopulated());
 printDuration("serializeValidators", () => state.serializeValidators());
 printDuration("serializedValidatorsSize", () => state.serializedValidatorsSize());
 printDuration("serializeValidatorsToBytes", () => {
@@ -146,12 +146,13 @@ printDuration("getExpectedWithdrawals()", () => state.getExpectedWithdrawals());
 
 if (blockBytes) {
   printDuration("computeBlockRewards", () => {
-    const rewards = state.computeBlockRewards("fulu", blockBytes);
+    const rewards = state.computeBlockRewards(blockBytes);
     console.log(`  proposerIndex: ${rewards.proposerIndex}, total: ${rewards.total}`);
     return rewards;
   });
   printDuration("computeSyncCommitteeRewards", () => {
-    const rewards = state.computeSyncCommitteeRewards("fulu", blockBytes);
+    const syncIndices = state.currentSyncCommitteeIndexed.validatorIndices;
+    const rewards = state.computeSyncCommitteeRewards(blockBytes, syncIndices);
     console.log(`  ${rewards.length} validators in sync committee`);
     return rewards;
   });

@@ -79,10 +79,10 @@ interface ExpectedWithdrawalsResult {
   processedValidatorSweepCount: number;
 }
 
-interface ProposerRewards {
-  attestations: bigint;
-  syncAggregate: bigint;
-  slashing: bigint;
+interface RewardCache {
+  attestations: number;
+  syncAggregate: number;
+  slashing: number;
 }
 
 interface EpochShuffling {
@@ -221,7 +221,7 @@ declare class BeaconStateView {
 
   effectiveBalanceIncrements: Uint16Array;
   getEffectiveBalanceIncrementsZeroInactive(): Uint16Array;
-  getBalance(index: number): bigint;
+  getBalance(index: number): number;
   getValidator(index: number): Validator;
   // TODO wrong function
   getValidatorStatus(index: number): ValidatorStatus;
@@ -235,10 +235,10 @@ declare class BeaconStateView {
 
   getExpectedWithdrawals(): ExpectedWithdrawalsResult;
 
-  proposerRewards: ProposerRewards;
-  computeBlockRewards(fork: string, signedBlockBytes: Uint8Array): BlockRewards;
-  computeAttestationsRewards(): AttestationsRewards;
-  computeSyncCommitteeRewards(fork: string, signedBlockBytes: Uint8Array): SyncCommitteeReward[];
+  proposerRewards: RewardCache;
+  computeBlockRewards(signedBlockBytes: Uint8Array): BlockRewards;
+  computeAttestationsRewards(validatorIds?: (number | string)[]): AttestationsRewards;
+  computeSyncCommitteeRewards(signedBlockBytes: Uint8Array, validatorIds: (number | string)[]): SyncCommitteeReward[];
   getLatestWeakSubjectivityCheckpointEpoch(): number;
 
   getVoluntaryExitValidity(signedVoluntaryExitBytes: Uint8Array, verifySignature: boolean): VoluntaryExitValidity;
@@ -257,7 +257,7 @@ declare class BeaconStateView {
   clonedCount: number;
   clonedCountWithTransferCache: number;
   createdWithTransferCache: boolean;
-  isStateValidatorsNodesPopulated: boolean;
+  isStateValidatorsNodesPopulated(): boolean;
 
   loadOtherState(stateBytes: Uint8Array, seedValidatorsBytes?: Uint8Array): BeaconStateView;
   serialize(): Uint8Array;
