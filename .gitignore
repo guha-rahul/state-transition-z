@@ -5,6 +5,7 @@ test/spec/test_case/
 *.ssz
 test/spec/ssz/generic_tests.zig
 test/spec/ssz/static_tests.zig
+test/spec/bls/spec_tests.zig
 *.era
 *.pkix
 
@@ -15,3 +16,7 @@ perf.data.old
 
 # js
 node_modules/
+
+# Claude Code local config
+.claude/settings.local.json
+.claude/plans/

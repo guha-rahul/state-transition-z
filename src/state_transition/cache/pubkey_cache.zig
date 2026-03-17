@@ -1,5 +1,5 @@
 const std = @import("std");
-const blst = @import("blst");
+const bls = @import("bls");
 const types = @import("consensus_types");
 const Validator = types.phase0.Validator.Type;
 
@@ -7,7 +7,7 @@ const Validator = types.phase0.Validator.Type;
 pub const PubkeyIndexMap = std.AutoHashMap([48]u8, u64);
 
 /// Map from validator index to pubkey
-pub const Index2PubkeyCache = std.ArrayList(blst.PublicKey);
+pub const Index2PubkeyCache = std.ArrayList(bls.PublicKey);
 
 /// Populate `pubkey_to_index` and `index_to_pubkey` caches from validators list.
 pub fn syncPubkeys(
@@ -31,15 +31,28 @@ pub fn syncPubkeys(
     for (old_len..new_count) |i| {
         const pubkey = &validators[i].pubkey;
         pubkey_to_index.putAssumeCapacity(pubkey.*, @intCast(i));
-        index_to_pubkey.items[i] = try blst.PublicKey.uncompress(pubkey);
+        index_to_pubkey.items[i] = try bls.PublicKey.uncompress(pubkey);
     }
 }
 
-fn putPubkeysAtIndices(start_index: usize, end_index_exclusive: usize, validators: []const Validator, pubkey_to_index: *PubkeyIndexMap, index_to_pubkey: *Index2PubkeyCache) void {
+fn uncompressPubkeys(
+    start_index: usize,
+    end_index_exclusive: usize,
+    validators: []const Validator,
+    index_to_pubkey: *Index2PubkeyCache,
+    uncompress_error: *std.atomic.Value(bool),
+) void {
+    std.debug.assert(start_index <= end_index_exclusive);
+    std.debug.assert(end_index_exclusive <= validators.len);
+    std.debug.assert(end_index_exclusive <= index_to_pubkey.items.len);
+
     for (start_index..end_index_exclusive) |i| {
+        if (uncompress_error.load(.monotonic)) return;
         const pubkey = &validators[i].pubkey;
-        pubkey_to_index.putAssumeCapacity(pubkey.*, @intCast(i));
-        index_to_pubkey.items[i] = blst.PublicKey.uncompress(pubkey) catch unreachable;
+        index_to_pubkey.items[i] = bls.PublicKey.uncompress(pubkey) catch {
+            uncompress_error.store(true, .release);
+            return;
+        };
     }
 }
 
@@ -62,6 +75,8 @@ pub fn syncPubkeysParallel(
     }
 
     try index_to_pubkey.resize(new_count);
+    errdefer index_to_pubkey.shrinkRetainingCapacity(old_len);
+
     try pubkey_to_index.ensureTotalCapacity(@intCast(new_count));
 
     var thread_pool: std.Thread.Pool = undefined;
@@ -69,6 +84,7 @@ pub fn syncPubkeysParallel(
     defer thread_pool.deinit();
 
     var wg = std.Thread.WaitGroup{};
+    var uncompress_error = std.atomic.Value(bool).init(false);
 
     var i = old_len;
     const batch_size = 1000;
@@ -76,18 +92,27 @@ pub fn syncPubkeysParallel(
     while (i < new_count) : (i += batch_size) {
         thread_pool.spawnWg(
             &wg,
-            putPubkeysAtIndices,
+            uncompressPubkeys,
             .{
                 i,
                 @min(i + batch_size, new_count),
                 validators,
-                pubkey_to_index,
                 index_to_pubkey,
+                &uncompress_error,
             },
         );
     }
 
     wg.wait();
+
+    if (uncompress_error.load(.acquire)) {
+        return error.InvalidPubkey;
+    }
+
+    // Update the shared map in single thread
+    for (old_len..new_count) |j| {
+        pubkey_to_index.putAssumeCapacity(validators[j].pubkey, @intCast(j));
+    }
 }
 
 // TODO: unit tests

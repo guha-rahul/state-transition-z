@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import {config} from "@lodestar/config/default";
 import * as era from "@lodestar/era";
-import bindings from "../src/index.ts";
-import {getFirstEraFilePath} from "./eraFiles.ts";
+import bindings from "../src/index.js";
+import {pubkeyCache} from "../src/pubkeys.js";
+import {getEraFilePaths, getFirstEraFilePath} from "./eraFiles.ts";
 
 console.log("loaded bindings");
 
@@ -31,15 +32,19 @@ const hasPkix = printDuration("check for pkix file", () => {
 });
 
 if (hasPkix) {
-  printDuration("load pkix from disk", () => bindings.pubkeys.load(PKIX_FILE));
+  printDuration("load pkix from disk", () => pubkeyCache.load(PKIX_FILE));
 } else {
   printDuration("update bindings capacity", () => {
     bindings.pool.ensureCapacity(10_000_000);
-    bindings.pubkeys.ensureCapacity(2_000_000);
+    pubkeyCache.ensureCapacity(2_000_000);
   });
 }
 
 const reader = await printDurationAsync("load era reader", () => era.era.EraReader.open(config, getFirstEraFilePath()));
+
+const nextReader = await printDurationAsync("load era reader", () =>
+  era.era.EraReader.open(config, getEraFilePaths()[1])
+);
 
 const stateBytes = await printDurationAsync("read serialized state", () => reader.readSerializedState());
 const blockSlot = reader.eraNumber * 8192 - 1;
@@ -47,7 +52,13 @@ const blockBytes = await printDurationAsync("read serialized block", () => reade
 
 const state = printDuration("create state view", () => bindings.BeaconStateView.createFromBytes(stateBytes));
 
-printDuration("write pkix to disk", () => bindings.pubkeys.save(PKIX_FILE));
+const signedBlockBytes = (await printDurationAsync("read serialized block", () =>
+  nextReader.readSerializedBlock(state.slot + 1)
+)) as Uint8Array;
+
+printDuration("state transition", () => bindings.stateTransition.stateTransition(state, signedBlockBytes));
+
+printDuration("write pkix to disk", () => pubkeyCache.save(PKIX_FILE));
 
 printDuration("get slot", () => state.slot);
 printDuration("get fork", () => state.fork);
