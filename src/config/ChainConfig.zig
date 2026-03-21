@@ -39,6 +39,9 @@ ELECTRA_FORK_EPOCH: u64,
 // FULU (assuming it's a future fork, standard pattern)
 FULU_FORK_VERSION: [4]u8,
 FULU_FORK_EPOCH: u64,
+// GLOAS (EIP-7732: Enshrined Proposer-Builder Separation)
+GLOAS_FORK_VERSION: [4]u8,
+GLOAS_FORK_EPOCH: u64,
 
 // Time parameters
 SECONDS_PER_SLOT: u64,

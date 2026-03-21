@@ -35,6 +35,8 @@ pub const chain_config = ChainConfig{
     .ELECTRA_FORK_EPOCH = std.math.maxInt(u64),
     .FULU_FORK_VERSION = b(4, "0x06000001"),
     .FULU_FORK_EPOCH = std.math.maxInt(u64),
+    .GLOAS_FORK_VERSION = b(4, "0x07000001"),
+    .GLOAS_FORK_EPOCH = std.math.maxInt(u64),
 
     // Time parameters
     .SECONDS_PER_SLOT = 6,
