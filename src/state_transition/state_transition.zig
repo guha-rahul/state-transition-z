@@ -30,6 +30,7 @@ const upgradeStateToCapella = @import("slot/upgrade_state_to_capella.zig").upgra
 const upgradeStateToDeneb = @import("slot/upgrade_state_to_deneb.zig").upgradeStateToDeneb;
 const upgradeStateToElectra = @import("slot/upgrade_state_to_electra.zig").upgradeStateToElectra;
 const upgradeStateToFulu = @import("slot/upgrade_state_to_fulu.zig").upgradeStateToFulu;
+const upgradeStateToGloas = @import("slot/upgrade_state_to_gloas.zig").upgradeStateToGloas;
 
 pub const ExecutionPayloadStatus = enum(u8) {
     pre_merge,
@@ -143,6 +144,14 @@ pub fn processSlots(
                     config,
                     epoch_cache,
                     try state.tryCastToFork(.electra),
+                )).inner };
+            }
+            if (state_epoch == config.chain.GLOAS_FORK_EPOCH) {
+                state.* = .{ .gloas = (try upgradeStateToGloas(
+                    allocator,
+                    config,
+                    epoch_cache,
+                    try state.tryCastToFork(.fulu),
                 )).inner };
             }
 

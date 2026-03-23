@@ -1,9 +1,18 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const BeaconConfig = @import("config").BeaconConfig;
 const ForkSeq = @import("config").ForkSeq;
 const BeaconState = @import("fork_types").BeaconState;
 const types = @import("consensus_types");
 const DepositRequest = types.electra.DepositRequest.Type;
 const PendingDeposit = types.electra.PendingDeposit.Type;
+const Builder = types.gloas.Builder;
+const BLSPubkey = types.primitive.BLSPubkey.Type;
+const BLSSignature = types.primitive.BLSSignature.Type;
 const c = @import("constants");
+const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
+const findBuilderIndexByPubkey = @import("../utils/gloas.zig").findBuilderIndexByPubkey;
+const isValidDepositSignature = @import("./process_deposit.zig").isValidDepositSignature;
 
 pub fn processDepositRequest(comptime fork: ForkSeq, state: *BeaconState(fork), deposit_request: *const DepositRequest) !void {
     const deposit_requests_start_index = try state.depositRequestsStartIndex();
@@ -21,4 +30,66 @@ pub fn processDepositRequest(comptime fork: ForkSeq, state: *BeaconState(fork), 
 
     var pending_deposits = try state.pendingDeposits();
     try pending_deposits.pushValue(&pending_deposit);
+}
+
+pub fn applyDepositForBuilder(
+    allocator: Allocator,
+    config: *const BeaconConfig,
+    state: *BeaconState(.gloas),
+    pubkey: *const BLSPubkey,
+    withdrawal_credentials: *const [32]u8,
+    amount: u64,
+    signature: BLSSignature,
+    slot: u64,
+) !void {
+    const builderIndex = try findBuilderIndexByPubkey(allocator, state, pubkey);
+
+    if (builderIndex) |idx| {
+        var builders = try state.inner.get("builders");
+        var existing: Builder.Type = undefined;
+        try builders.getValue(allocator, idx, &existing);
+        existing.balance += amount;
+        try builders.setValue(idx, &existing);
+    } else {
+        if (!isValidDepositSignature(config, pubkey, withdrawal_credentials, amount, signature)) return;
+        try addBuilderToRegistry(allocator, state, pubkey, withdrawal_credentials, amount, slot);
+    }
+}
+
+fn addBuilderToRegistry(
+    allocator: Allocator,
+    state: *BeaconState(.gloas),
+    pubkey: *const BLSPubkey,
+    withdrawal_credentials: *const [32]u8,
+    amount: u64,
+    slot: u64,
+) !void {
+    var builders = try state.inner.get("builders");
+    const len = try builders.length();
+    const current_epoch = computeEpochAtSlot(try state.slot());
+
+    var builderIndex: ?usize = null;
+    var it = builders.iteratorReadonly(0);
+    for (0..len) |i| {
+        const b = try it.nextValue(allocator);
+        if (b.withdrawable_epoch <= current_epoch and b.balance == 0) {
+            builderIndex = i;
+            break;
+        }
+    }
+
+    const new_builder = Builder.Type{
+        .pubkey = pubkey.*,
+        .version = withdrawal_credentials[0],
+        .execution_address = withdrawal_credentials[12..32].*,
+        .balance = amount,
+        .deposit_epoch = computeEpochAtSlot(slot),
+        .withdrawable_epoch = c.FAR_FUTURE_EPOCH,
+    };
+
+    if (builderIndex) |idx| {
+        try builders.setValue(idx, &new_builder);
+    } else {
+        try builders.pushValue(&new_builder);
+    }
 }
