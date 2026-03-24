@@ -75,7 +75,7 @@ pub fn processOperations(
         }
     }
 
-    if (comptime fork.gte(.electra)) {
+    if (comptime fork.gte(.electra) and fork.lt(.gloas)) {
         const execution_requests = &body.inner.execution_requests;
         for (execution_requests.deposits.items) |*deposit_request| {
             try processDepositRequest(fork, state, deposit_request);
@@ -87,6 +87,13 @@ pub fn processOperations(
 
         for (execution_requests.consolidations.items) |*consolidation_request| {
             try processConsolidationRequest(fork, config, epoch_cache, state, consolidation_request);
+        }
+    }
+
+    if (comptime fork.gte(.gloas)) {
+        for (body.inner.payload_attestations.items) |*payload_attestation| {
+            _ = payload_attestation;
+            // TODO: call processPayloadAttestation
         }
     }
 }

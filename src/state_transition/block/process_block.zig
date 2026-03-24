@@ -24,6 +24,7 @@ const processRandao = @import("./process_randao.zig").processRandao;
 const processSyncAggregate = @import("./process_sync_committee.zig").processSyncAggregate;
 const processWithdrawals = @import("./process_withdrawals.zig").processWithdrawals;
 const getExpectedWithdrawals = @import("./process_withdrawals.zig").getExpectedWithdrawals;
+const processExecutionPayloadBid = @import("./process_execution_payload_bid.zig").processExecutionPayloadBid;
 const isExecutionEnabled = @import("../utils/execution.zig").isExecutionEnabled;
 // TODO: proposer reward api
 // const ProposerRewardType = @import("../types/proposer_reward.zig").ProposerRewardType;
@@ -60,7 +61,7 @@ pub fn processBlock(
         if (isExecutionEnabled(fork, state, block_type, block)) {
             // TODO Deneb: Allow to disable withdrawals for interop testing
             // https://github.com/ethereum/consensus-specs/blob/b62c9e877990242d63aa17a2a59a49bc649a2f2e/specs/eip4844/beacon-chain.md#disabling-withdrawals
-            if (comptime fork.gte(.capella)) {
+            if (comptime fork.gte(.capella) and fork.lt(.gloas)) {
                 // TODO: given max withdrawals of MAX_WITHDRAWALS_PER_PAYLOAD, can use fixed size array instead of heap alloc
                 var withdrawals_result = WithdrawalsResult{ .withdrawals = try Withdrawals.initCapacity(
                     allocator,
@@ -92,17 +93,24 @@ pub fn processBlock(
                 try processWithdrawals(fork, allocator, state, withdrawals_result, payload_withdrawals_root);
             }
 
-            try processExecutionPayload(
-                fork,
-                allocator,
-                config,
-                state,
-                current_epoch,
-                block_type,
-                body,
-                external_data,
-            );
+            if (comptime fork.lt(.gloas)) {
+                try processExecutionPayload(
+                    fork,
+                    allocator,
+                    config,
+                    state,
+                    current_epoch,
+                    block_type,
+                    body,
+                    external_data,
+                );
+            }
         }
+    }
+
+    //  process_execution_payload_bid replaces process_execution_payload
+    if (comptime fork.gte(.gloas)) {
+        try processExecutionPayloadBid(allocator, config, epoch_cache, state, block_type, block);
     }
 
     try processRandao(fork, config, epoch_cache, state, block_type, body, block.proposerIndex(), opts.verify_signature);

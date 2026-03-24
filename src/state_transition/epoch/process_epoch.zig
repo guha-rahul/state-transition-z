@@ -24,6 +24,7 @@ const processHistoricalRootsUpdate = @import("./process_historical_roots_update.
 const processParticipationRecordUpdates = @import("./process_participation_record_updates.zig").processParticipationRecordUpdates;
 const processParticipationFlagUpdates = @import("./process_participation_flag_updates.zig").processParticipationFlagUpdates;
 const processSyncCommitteeUpdates = @import("./process_sync_committee_updates.zig").processSyncCommitteeUpdates;
+const processBuilderPendingPayments = @import("./process_builder_pending_payments.zig").processBuilderPendingPayments;
 const processProposerLookahead = @import("./process_proposer_lookahead.zig").processProposerLookahead;
 const Node = @import("persistent_merkle_tree").Node;
 
@@ -67,6 +68,12 @@ pub fn processEpoch(
         timer = try Timer.start();
         try processPendingConsolidations(fork, epoch_cache, state, cache);
         try observeEpochTransitionStep(.{ .step = .process_pending_consolidations }, timer.read());
+    }
+
+    if (comptime fork.gte(.gloas)) {
+        timer = try Timer.start();
+        try processBuilderPendingPayments(allocator, state, epoch_cache.total_active_balance_increments);
+        try observeEpochTransitionStep(.{ .step = .process_builder_pending_payments }, timer.read());
     }
 
     // const numUpdate = processEffectiveBalanceUpdates(fork, state, cache);

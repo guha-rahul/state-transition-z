@@ -54,10 +54,10 @@ pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *Beaco
     }
 
     var payments = try state.inner.get("builder_pending_payments");
-    const payments_len = try payments.length();
-    var p_it = payments.iteratorReadonly(0);
-    for (0..payments_len) |_| {
-        const p = try p_it.nextValue(allocator);
+    const payments_len = ct.gloas.BeaconState.getFieldType("builder_pending_payments").length;
+    for (0..payments_len) |i| {
+        var p: ct.gloas.BuilderPendingPayment.Type = undefined;
+        try payments.getValue(allocator, i, &p);
         if (p.withdrawal.builder_index == builder_index) {
             pending_balance += p.withdrawal.amount;
         }
@@ -138,3 +138,4 @@ pub fn isPubkeyInList(list: []const BLSPubkey, pubkey: *const BLSPubkey) bool {
     }
     return false;
 }
+
