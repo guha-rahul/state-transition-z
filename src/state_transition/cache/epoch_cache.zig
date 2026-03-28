@@ -895,7 +895,7 @@ pub const EpochCache = struct {
     pub fn getPayloadTimelinessCommittee(self: *const EpochCache, slot: Slot) ![]const ValidatorIndex {
         const epoch = computeEpochAtSlot(slot);
 
-        if (epoch < self.config.GLOAS_FORK_EPOCH) {
+        if (epoch < self.config.chain.GLOAS_FORK_EPOCH) {
             return error.PtcNotAvailableBeforeGloas;
         }
 

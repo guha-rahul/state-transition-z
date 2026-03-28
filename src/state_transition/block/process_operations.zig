@@ -21,6 +21,7 @@ const processVoluntaryExit = @import("./process_voluntary_exit.zig").processVolu
 const processWithdrawalRequest = @import("./process_withdrawal_request.zig").processWithdrawalRequest;
 const Node = @import("persistent_merkle_tree").Node;
 const ProcessBlockOpts = @import("./process_block.zig").ProcessBlockOpts;
+const processPayloadAttestation = @import("./process_payload_attestation.zig").processPayloadAttestation;
 
 pub fn processOperations(
     comptime fork: ForkSeq,
@@ -92,8 +93,7 @@ pub fn processOperations(
 
     if (comptime fork.gte(.gloas)) {
         for (body.inner.payload_attestations.items) |*payload_attestation| {
-            _ = payload_attestation;
-            // TODO: call processPayloadAttestation
+            try processPayloadAttestation(allocator, config, epoch_cache, state, payload_attestation);
         }
     }
 }
