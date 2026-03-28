@@ -67,7 +67,7 @@ pub fn processOperations(
     }
 
     for (body.inner.voluntary_exits.items) |*voluntary_exit| {
-        try processVoluntaryExit(fork, config, epoch_cache, state, voluntary_exit, opts.verify_signature);
+        try processVoluntaryExit(fork, allocator, config, epoch_cache, state, voluntary_exit, opts.verify_signature);
     }
 
     if (comptime fork.gte(.capella)) {
