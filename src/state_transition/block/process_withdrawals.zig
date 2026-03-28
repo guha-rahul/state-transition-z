@@ -230,7 +230,7 @@ fn applyWithdrawals(
     withdrawals: []const Withdrawal,
 ) !void {
     for (withdrawals) |withdrawal| {
-        if (comptime fork.gte(.gloas) and isBuilderIndex(withdrawal.validator_index)) {
+        if (fork.gte(.gloas) and isBuilderIndex(withdrawal.validator_index)) {
             // Handle builder withdrawal
             const builder_index = convertValidatorIndexToBuilderIndex(withdrawal.validator_index);
             var builders = try state.inner.get("builders");
