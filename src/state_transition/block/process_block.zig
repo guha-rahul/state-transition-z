@@ -110,7 +110,7 @@ pub fn processBlock(
 
     //  process_execution_payload_bid replaces process_execution_payload
     if (comptime fork.gte(.gloas)) {
-        try processExecutionPayloadBid(allocator, config, epoch_cache, state, block_type, block);
+        try processExecutionPayloadBid(allocator, config, state, block);
     }
 
     try processRandao(fork, config, epoch_cache, state, block_type, body, block.proposerIndex(), opts.verify_signature);
