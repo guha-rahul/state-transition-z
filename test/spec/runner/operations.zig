@@ -200,7 +200,9 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                     try state_transition.processDeposit(fork, allocator, config, epoch_cache, state, &self.op);
                 },
                 .deposit_request => {
-                    try state_transition.processDepositRequest(fork, state, &self.op);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processDepositRequest(fork, allocator, config, epoch_cache, state, &self.op);
                 },
                 .execution_payload => {
                     const config = cached_state.config;
@@ -253,6 +255,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                     const epoch_cache = cached_state.epoch_cache;
                     try state_transition.processVoluntaryExit(
                         fork,
+                        allocator,
                         config,
                         epoch_cache,
                         state,
