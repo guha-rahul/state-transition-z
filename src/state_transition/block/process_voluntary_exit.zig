@@ -189,7 +189,6 @@ fn getValidatorVoluntaryExitValidity(
     return .valid;
 }
 
-const std = @import("std");
 const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
 const Node = @import("persistent_merkle_tree").Node;
 const preset = @import("preset").preset;
@@ -218,6 +217,7 @@ test "voluntary exit - valid" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         test_state.cached_state.state.castToFork(.electra),
@@ -241,6 +241,7 @@ test "voluntary exit - inactive validator (out of bounds index)" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         test_state.cached_state.state.castToFork(.electra),
@@ -271,6 +272,7 @@ test "voluntary exit - inactive validator (not active in current epoch)" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         state,
@@ -301,6 +303,7 @@ test "voluntary exit - already exited validator" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         state,
@@ -326,6 +329,7 @@ test "voluntary exit - early epoch" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         test_state.cached_state.state.castToFork(.electra),
@@ -356,6 +360,7 @@ test "voluntary exit - short time active" {
 
     const result = try getVoluntaryExitValidity(
         .electra,
+        allocator,
         test_state.config,
         test_state.cached_state.epoch_cache,
         state,
