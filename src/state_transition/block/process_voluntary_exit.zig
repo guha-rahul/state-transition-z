@@ -37,7 +37,7 @@ pub fn processVoluntaryExit(
     }
 
     if (fork.gte(.gloas) and isBuilderIndex(voluntary_exit.validator_index)) {
-        try initiateBuilderExit(state, allocator, convertValidatorIndexToBuilderIndex(voluntary_exit.validator_index));
+        try initiateBuilderExit(config, state, allocator, convertValidatorIndexToBuilderIndex(voluntary_exit.validator_index));
         return;
     }
 
@@ -90,7 +90,7 @@ pub fn getVoluntaryExitValidity(
         return getBuilderVoluntaryExitValidity(allocator, config, epoch_cache, state, signed_voluntary_exit, verify_signature);
     }
 
-    return getValidatorVoluntaryExitValidity(fork, config, epoch_cache, state, signed_voluntary_exit, verify_signature);
+    return getValidatorVoluntaryExitValidity(fork, allocator, config, epoch_cache, state, signed_voluntary_exit, verify_signature);
 }
 
 fn getBuilderVoluntaryExitValidity(
@@ -127,10 +127,8 @@ fn getBuilderVoluntaryExitValidity(
     }
 
     // Verify signature
-    if (verify_signature) {
-        if (!try verifyVoluntaryExitSignature(config, epoch_cache, signed_voluntary_exit)) {
-            return .invalid_signature;
-        }
+    if (verify_signature and !try verifyVoluntaryExitSignature(allocator, config, epoch_cache, state, signed_voluntary_exit)) {
+        return .invalid_signature;
     }
 
     return .valid;
@@ -138,6 +136,7 @@ fn getBuilderVoluntaryExitValidity(
 
 fn getValidatorVoluntaryExitValidity(
     comptime fork: ForkSeq,
+    allocator: Allocator,
     config: *const BeaconConfig,
     epoch_cache: *const EpochCache,
     state: *BeaconState(fork),
@@ -181,7 +180,7 @@ fn getValidatorVoluntaryExitValidity(
 
     // verify signature
     if (verify_signature) {
-        if (!try verifyVoluntaryExitSignature(config, epoch_cache, signed_voluntary_exit)) {
+        if (!try verifyVoluntaryExitSignature(allocator, config, epoch_cache, state, signed_voluntary_exit)) {
             return .invalid_signature;
         }
     }
