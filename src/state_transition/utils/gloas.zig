@@ -8,7 +8,15 @@ const preset = @import("preset").preset;
 const c = @import("constants");
 const getBlockRootAtSlot = @import("./block_root.zig").getBlockRootAtSlot;
 const computeEpochAtSlot = @import("./epoch.zig").computeEpochAtSlot;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
+const computePayloadTimelinessCommitteeForSlot = @import("./seed.zig").computePayloadTimelinessCommitteeForSlot;
 const computePayloadTimelinessCommitteesForEpoch = @import("./seed.zig").computePayloadTimelinessCommitteesForEpoch;
+const getSeed = @import("./seed.zig").getSeed;
+const Sha256 = std.crypto.hash.sha2.Sha256;
+const EpochShuffling = @import("./epoch_shuffling.zig").EpochShuffling;
+const computeEpochShuffling = @import("./epoch_shuffling.zig").computeEpochShuffling;
+const isActiveValidator = @import("./validator.zig").isActiveValidator;
+const computeStartSlotAtEpoch = @import("./epoch.zig").computeStartSlotAtEpoch;
 const RootCache = @import("../cache/root_cache.zig").RootCache;
 const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const isValidDepositSignature = @import("../block/process_deposit.zig").isValidDepositSignature;
@@ -131,6 +139,29 @@ pub fn isAttestationSameSlotRootCache(root_cache: *RootCache(.gloas), data: *con
     return is_matching and is_current;
 }
 
+// TODO: Need to check if these are used at all
+/// computePayloadTimelinessCommitteeIndices uses the optimized increments-based check instead.
+pub fn isBalanceWeightedAcceptance(effective_balance: u64, random_value: u64) bool {
+    const MAX_RANDOM_VALUE: u64 = 0xFFFF;
+    return effective_balance * MAX_RANDOM_VALUE >= preset.MAX_EFFECTIVE_BALANCE_ELECTRA * random_value;
+}
+
+// TODO: Need to check if these are used at all
+/// computePayloadTimelinessCommitteeIndices inlines this logic with increments instead of full Gwei balances.
+pub fn computeBalanceWeightedAcceptance(effective_balance: u64, seed: *const [32]u8, i: u64) bool {
+    var hash_input: [40]u8 = undefined;
+    @memcpy(hash_input[0..32], seed);
+    std.mem.writeInt(u64, hash_input[32..][0..8], i / 16, .little);
+
+    var random_bytes: [32]u8 = undefined;
+    Sha256.hash(&hash_input, &random_bytes, .{});
+
+    const offset: usize = @intCast((i % 16) * 2);
+    const random_value: u64 = std.mem.readInt(u16, random_bytes[offset..][0..2], .little);
+
+    return isBalanceWeightedAcceptance(effective_balance, random_value);
+}
+
 pub fn isParentBlockFull(state: *BeaconState(.gloas)) !bool {
     var bid = try state.inner.get("latest_execution_payload_bid");
     const bid_block_hash = try bid.getFieldRoot("block_hash");
@@ -174,6 +205,45 @@ pub fn isPendingValidator(
     }
 
     return false;
+}
+
+pub fn computePtc(
+    allocator: Allocator,
+    state: *BeaconState(.gloas),
+    slot: u64,
+    shuffling: ?*EpochShuffling,
+    effective_balance_increments: []const u16,
+) ![ct.gloas.PtcWindow.Element.length]ValidatorIndex {
+    const epoch = computeEpochAtSlot(slot);
+
+    const epoch_shuffling = if (shuffling) |s| s else blk: {
+        var validators = try state.validators();
+        const validator_count = try validators.length();
+        var active_indices = std.ArrayList(ValidatorIndex).init(allocator);
+        for (0..validator_count) |i| {
+            var validator: ct.phase0.Validator.Type = undefined;
+            try validators.getValue(undefined, i, &validator);
+            if (isActiveValidator(&validator, epoch)) {
+                try active_indices.append(@intCast(i));
+            }
+        }
+        var any_state = AnyBeaconState{ .gloas = state.inner };
+        break :blk try computeEpochShuffling(allocator, &any_state, try active_indices.toOwnedSlice(), epoch);
+    };
+    defer if (shuffling == null) epoch_shuffling.deinit();
+
+    var epoch_seed: [32]u8 = undefined;
+    try getSeed(.gloas, state, epoch, c.DOMAIN_PTC_ATTESTER, &epoch_seed);
+
+    var slot_seed_input: [40]u8 = undefined;
+    @memcpy(slot_seed_input[0..32], &epoch_seed);
+    std.mem.writeInt(u64, slot_seed_input[32..][0..8], slot, .little);
+
+    var slot_seed: [32]u8 = undefined;
+    Sha256.hash(&slot_seed_input, &slot_seed, .{});
+
+    const slot_committees = epoch_shuffling.committees[slot % preset.SLOTS_PER_EPOCH];
+    return computePayloadTimelinessCommitteeForSlot(allocator, &slot_seed, slot_committees, effective_balance_increments);
 }
 
 pub fn initializePtcWindow(
