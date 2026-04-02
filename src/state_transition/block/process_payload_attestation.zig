@@ -25,7 +25,8 @@ pub fn processPayloadAttestation(
         return error.PayloadAttestationNotFromPreviousSlot;
     }
 
-    const indexed_payload_attestation = try epoch_cache.getIndexedPayloadAttestation(allocator, data.slot, payload_attestation);
+    var indexed_payload_attestation = try epoch_cache.getIndexedPayloadAttestation(allocator, state, data.slot, payload_attestation);
+    defer indexed_payload_attestation.attesting_indices.deinit(allocator);
 
     if (!(try isValidIndexedPayloadAttestation(allocator, config, epoch_cache, &indexed_payload_attestation, true))) {
         return error.InvalidPayloadAttestation;

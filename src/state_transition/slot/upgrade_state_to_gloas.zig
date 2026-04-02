@@ -18,6 +18,7 @@ const gloas_utils = @import("../utils/gloas.zig");
 const findBuilderIndexByPubkey = gloas_utils.findBuilderIndexByPubkey;
 const isBuilderWithdrawalCredential = gloas_utils.isBuilderWithdrawalCredential;
 const isPubkeyInList = gloas_utils.isPubkeyInList;
+const initializePtcWindow = gloas_utils.initializePtcWindow;
 
 pub fn upgradeStateToGloas(
     allocator: Allocator,
@@ -47,6 +48,9 @@ pub fn upgradeStateToGloas(
 
     const availability = ExecPayloadAvailability{ .data = [_]u8{0xFF} ** @divExact(ExecPayloadAvailability.length, 8) };
     try state.inner.setValue("execution_payload_availability", &availability);
+
+    const ptc_window = try initializePtcWindow(.gloas, allocator, epoch_cache, &state);
+    try state.inner.setValue("ptc_window", &ptc_window);
 
     try onboardBuildersFromPendingDeposits(allocator, config, epoch_cache, &state);
 

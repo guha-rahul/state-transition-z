@@ -92,6 +92,10 @@ pub const LightClientFinalityUpdate = electra.LightClientFinalityUpdate;
 pub const LightClientOptimisticUpdate = electra.LightClientOptimisticUpdate;
 
 pub const ProposerLookahead = fulu.ProposerLookahead;
+pub const PtcWindow = ssz.FixedVectorType(
+    ssz.FixedVectorType(p.ValidatorIndex, preset.PTC_SIZE),
+    (2 + preset.MIN_SEED_LOOKAHEAD) * preset.SLOTS_PER_EPOCH,
+);
 
 pub const BlobSidecar = electra.BlobSidecar;
 
@@ -247,4 +251,5 @@ pub const BeaconState = ssz.VariableContainerType(struct {
     builder_pending_withdrawals: ssz.FixedListType(BuilderPendingWithdrawal, preset.BUILDER_PENDING_WITHDRAWALS_LIMIT),
     latest_block_hash: p.Bytes32,
     payload_expected_withdrawals: ssz.FixedListType(Withdrawal, preset.MAX_WITHDRAWALS_PER_PAYLOAD),
+    ptc_window: PtcWindow,
 });

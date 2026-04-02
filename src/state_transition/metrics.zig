@@ -37,6 +37,7 @@ pub const EpochTransitionStepKind = enum {
     process_pending_consolidations,
     process_builder_pending_payments,
     process_proposer_lookahead,
+    process_ptc_window,
 };
 
 pub const ProposerRewardKind = enum {

@@ -30,6 +30,7 @@ const getTotalSlashingsByIncrement = @import("../epoch/process_slashings.zig").g
 const computeEpochShuffling = @import("../utils/epoch_shuffling.zig").computeEpochShuffling;
 const getSeed = @import("../utils/seed.zig").getSeed;
 const computeProposers = @import("../utils/seed.zig").computeProposers;
+const computePayloadTimelinessCommitteesForEpoch = @import("../utils/seed.zig").computePayloadTimelinessCommitteesForEpoch;
 const SyncCommitteeCacheRc = @import("./sync_committee_cache.zig").SyncCommitteeCacheRc;
 const SyncCommitteeCacheAllForks = @import("./sync_committee_cache.zig").SyncCommitteeCache;
 const computeSyncParticipantReward = @import("../utils/sync_committee.zig").computeSyncParticipantReward;
@@ -449,6 +450,19 @@ pub const EpochCache = struct {
             .previous_payload_timeliness_committees = null,
         };
 
+        // Compute PTC for all slots in the prev/current epoch
+        if (current_epoch >= config.chain.GLOAS_FORK_EPOCH) {
+            epoch_cache_ptr.payload_timeliness_committees = switch (state.forkSeq()) {
+                inline else => |f| try computePayloadTimelinessCommitteesForEpoch(f, allocator, state.castToFork(f), current_epoch, epoch_cache_ptr),
+            };
+
+            if (!is_genesis and previous_epoch >= config.chain.GLOAS_FORK_EPOCH) {
+                epoch_cache_ptr.previous_payload_timeliness_committees = switch (state.forkSeq()) {
+                    inline else => |f| try computePayloadTimelinessCommitteesForEpoch(f, allocator, state.castToFork(f), previous_epoch, epoch_cache_ptr),
+                };
+            }
+        }
+
         return epoch_cache_ptr;
     }
 
@@ -587,6 +601,21 @@ pub const EpochCache = struct {
     /// At fork boundary, this runs post-fork logic and after `upgradeState*`.
     pub fn finalProcessEpoch(self: *EpochCache, state: *AnyBeaconState) !void {
         self.proposers_prev_epoch = self.proposers;
+
+        // Shift and compute current epoch PTC eagerly for all slots
+        if (self.epoch >= self.config.chain.GLOAS_FORK_EPOCH) {
+            self.previous_payload_timeliness_committees = self.payload_timeliness_committees;
+            self.payload_timeliness_committees = switch (state.forkSeq()) {
+                inline else => |f| try computePayloadTimelinessCommitteesForEpoch(
+                    f,
+                    self.allocator,
+                    state.castToFork(f),
+                    self.epoch,
+                    self,
+                ),
+            };
+        }
+
         switch (state.forkSeq()) {
             inline else => |fork| {
                 const fork_state = state.castToFork(fork);
@@ -892,35 +921,34 @@ pub const EpochCache = struct {
 
     /// Convert a PayloadAttestation into an IndexedPayloadAttestation by resolving
     /// aggregation bits against the Payload Timeliness Committee for the attestation's slot.
-    pub fn getPayloadTimelinessCommittee(self: *const EpochCache, slot: Slot) ![]const ValidatorIndex {
+    /// Spec: get_ptc — Read PTC from state.ptc_window
+    pub fn getPayloadTimelinessCommittee(self: *const EpochCache, state: *BeaconState(.gloas), slot: Slot) ![preset.PTC_SIZE]ValidatorIndex {
+        _ = self;
         const epoch = computeEpochAtSlot(slot);
+        const state_epoch = computeEpochAtSlot(try state.slot());
 
-        if (epoch < self.config.chain.GLOAS_FORK_EPOCH) {
-            return error.PtcNotAvailableBeforeGloas;
-        }
+        var ptc_window = try state.inner.get("ptc_window");
 
-        if (epoch == self.epoch) {
-            if (self.payload_timeliness_committees) |*committees| {
-                return &committees[slot % preset.SLOTS_PER_EPOCH];
-            }
-        }
+        const index = if (epoch < state_epoch) blk: {
+            break :blk slot % preset.SLOTS_PER_EPOCH;
+        } else blk: {
+            const offset = (epoch - state_epoch + 1) * preset.SLOTS_PER_EPOCH;
+            break :blk offset + slot % preset.SLOTS_PER_EPOCH;
+        };
 
-        if (epoch == self.epoch -| 1) {
-            if (self.previous_payload_timeliness_committees) |*committees| {
-                return &committees[slot % preset.SLOTS_PER_EPOCH];
-            }
-        }
-
-        return error.PtcNotAvailableForSlot;
+        var ptc_entry: [preset.PTC_SIZE]ValidatorIndex = undefined;
+        try ptc_window.getValue(undefined, index, &ptc_entry);
+        return ptc_entry;
     }
 
     pub fn getIndexedPayloadAttestation(
         self: *const EpochCache,
         allocator: Allocator,
+        state: *BeaconState(.gloas),
         slot: Slot,
         payload_attestation: *const types.gloas.PayloadAttestation.Type,
     ) !types.gloas.IndexedPayloadAttestation.Type {
-        const payload_timeliness_committee = try self.getPayloadTimelinessCommittee(slot);
+        const payload_timeliness_committee = try self.getPayloadTimelinessCommittee(state, slot);
 
         var attesting_indices = std.ArrayList(ValidatorIndex).init(allocator);
         errdefer attesting_indices.deinit();
