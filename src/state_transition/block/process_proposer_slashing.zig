@@ -12,6 +12,7 @@ const getProposerSlashingSignatureSets = @import("../signature_sets/proposer_sla
 const verifySignature = @import("../utils/signature_sets.zig").verifySingleSignatureSet;
 const slashValidator = @import("./slash_validator.zig").slashValidator;
 const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
+const computePreviousEpoch = @import("../utils/epoch.zig").computePreviousEpoch;
 const preset = @import("preset").preset;
 
 pub fn processProposerSlashing(
@@ -31,7 +32,7 @@ pub fn processProposerSlashing(
         const slot = proposer_slashing.signed_header_1.message.slot;
         const proposal_epoch = computeEpochAtSlot(slot);
         const current_epoch = epoch_cache.epoch;
-        const previous_epoch = current_epoch - 1;
+        const previous_epoch = computePreviousEpoch(current_epoch);
 
         const payment_index: ?u64 = if (proposal_epoch == current_epoch)
             preset.SLOTS_PER_EPOCH + (slot % preset.SLOTS_PER_EPOCH)
