@@ -69,7 +69,7 @@ pub fn processDeposit(
     try types.phase0.DepositData.hashTreeRoot(&deposit.data, &deposit_data_root);
 
     var eth1_data = try state.eth1Data();
-    const deposit_root = try eth1_data.getRoot("deposit_root");
+    const deposit_root = try eth1_data.getFieldRoot("deposit_root");
     if (!verifyMerkleBranch(
         deposit_data_root,
         &deposit.proof,
@@ -171,7 +171,7 @@ pub fn addValidatorToRegistry(
     try validators.pushValue(&validator);
 
     const validator_index = (try validators.length()) - 1;
-    // TODO Electra: Review this
+    // In Electra, new validators start with amount=0 (actual deposit goes through pendingDeposits)
     // Updating here is better than updating at once on epoch transition
     // - Simplify genesis fn applyDeposits(): effectiveBalanceIncrements is populated immediately
     // - Keep related code together to reduce risk of breaking this cache

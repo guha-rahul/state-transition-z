@@ -91,9 +91,18 @@ jobs:
       - name: Run config tests
         run: |
           zig build test:config
+      - name: Run constants tests
+        run: |
+          zig build test:constants
       - name: Run consensus-type tests
         run: |
           zig build test:consensus_types
+      - name: Run fork_types tests
+        run: |
+          zig build test:fork_types
+      - name: Run era tests
+        run: |
+          zig build test:era
       - name: Run preset tests
         run: |
           zig build test:preset
@@ -325,3 +334,18 @@ jobs:
       - name: Test bindings
         run: |
           pnpm test
+
+  build-examples:
+    name: build examples
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+          cache-key: ubuntu-latest-${{ env.ZIG_VERSION }}
+      - name: Build metrics example
+        run: |
+          zig build build-exe:metrics_stf
