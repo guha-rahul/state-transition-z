@@ -623,7 +623,7 @@ pub fn isExecutionEnabled(self: *const BeaconStateView, fork_name_value: js.Stri
 
     const result = switch (cached_state.state.forkSeq()) {
         inline else => |f| switch (signed_block.blockType()) {
-            inline else => |bt| if (comptime bt == .blinded and f.lt(.bellatrix)) {
+            inline else => |bt| if (comptime (bt == .blinded and f.lt(.bellatrix)) or (bt == .blinded and f.gte(.gloas))) {
                 return error.InvalidBlockTypeForFork;
             } else st.isExecutionEnabled(
                 f,
