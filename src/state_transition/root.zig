@@ -78,6 +78,8 @@ pub const processBlsToExecutionChange = @import("./block/process_bls_to_executio
 pub const processDepositRequest = @import("./block/process_deposit_request.zig").processDepositRequest;
 pub const processWithdrawalRequest = @import("./block/process_withdrawal_request.zig").processWithdrawalRequest;
 pub const processConsolidationRequest = @import("./block/process_consolidation_request.zig").processConsolidationRequest;
+pub const processBuilderDepositRequest = @import("./block/process_builder_deposit_request.zig").processBuilderDepositRequest;
+pub const processBuilderExitRequest = @import("./block/process_builder_exit_request.zig").processBuilderExitRequest;
 
 // utils
 pub const validator_status = @import("./utils/validator_status.zig");
