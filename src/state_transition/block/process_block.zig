@@ -24,6 +24,7 @@ const processRandao = @import("./process_randao.zig").processRandao;
 const processSyncAggregate = @import("./process_sync_committee.zig").processSyncAggregate;
 const processWithdrawals = @import("./process_withdrawals.zig").processWithdrawals;
 const getExpectedWithdrawals = @import("./process_withdrawals.zig").getExpectedWithdrawals;
+const processExecutionPayloadBid = @import("./process_execution_payload_bid.zig").processExecutionPayloadBid;
 const processParentExecutionPayload = @import("./process_parent_execution_payload.zig").processParentExecutionPayload;
 const isExecutionEnabled = @import("../utils/execution.zig").isExecutionEnabled;
 // TODO: proposer reward api
@@ -103,6 +104,17 @@ pub fn processBlock(
                 external_data,
             );
         }
+    }
+
+    if (comptime fork.gte(.gloas)) {
+        if (comptime block_type != .full) return error.InvalidBlockTypeForFork;
+        try processExecutionPayloadBid(
+            allocator,
+            config,
+            epoch_cache,
+            state,
+            &body.inner.signed_execution_payload_bid,
+        );
     }
 
     try processRandao(fork, config, epoch_cache, state, block_type, body, block.proposerIndex(), opts.verify_signature);

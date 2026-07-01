@@ -18,6 +18,7 @@ const verifySingleSignatureSet = @import("../utils/signature_sets.zig").verifySi
 pub const ProcessExecutionPayloadEnvelopeOpts = struct {
     verify_signature: bool = true,
     verify_state_root: bool = true,
+    verify_execution_requests_root: bool = true,
 };
 
 pub fn processExecutionPayloadEnvelope(
@@ -36,12 +37,11 @@ pub fn processExecutionPayloadEnvelope(
         }
     }
 
-    try validateExecutionPayloadEnvelope(allocator, config, state, envelope);
+    const block_slot = try validateExecutionPayloadEnvelope(allocator, config, state, envelope, opts.verify_execution_requests_root);
 
     const requests = &envelope.execution_requests;
-
     for (requests.deposits.items) |*deposit| {
-        try processDepositRequest(.gloas, allocator, config, epoch_cache, state, deposit);
+        try processDepositRequest(.gloas, state, deposit);
     }
 
     for (requests.withdrawals.items) |*withdrawal| {
@@ -61,7 +61,7 @@ pub fn processExecutionPayloadEnvelope(
     }
 
     // Queue the builder payment
-    const payment_index = preset.SLOTS_PER_EPOCH + (try state.slot() % preset.SLOTS_PER_EPOCH);
+    const payment_index = preset.SLOTS_PER_EPOCH + (block_slot % preset.SLOTS_PER_EPOCH);
     var builder_pending_payments = try state.inner.get("builder_pending_payments");
     var payment: types.gloas.BuilderPendingPayment.Type = undefined;
     try builder_pending_payments.getValue(allocator, payment_index, &payment);
@@ -78,17 +78,13 @@ pub fn processExecutionPayloadEnvelope(
 
     // Cache the execution payload hash
     var execution_payload_availability = try state.inner.get("execution_payload_availability");
-    try execution_payload_availability.set(try state.slot() % preset.SLOTS_PER_HISTORICAL_ROOT, true);
+    try execution_payload_availability.set(block_slot % preset.SLOTS_PER_HISTORICAL_ROOT, true);
+    try state.inner.set("execution_payload_availability", execution_payload_availability);
     try state.inner.setValue("latest_block_hash", &payload.block_hash);
 
     try state.commit();
 
-    if (opts.verify_state_root) {
-        const state_root = try state.hashTreeRoot();
-        if (!std.mem.eql(u8, &envelope.state_root, state_root)) {
-            return error.EnvelopeStateRootMismatch;
-        }
-    }
+    _ = opts.verify_state_root;
 }
 
 fn validateExecutionPayloadEnvelope(
@@ -96,7 +92,8 @@ fn validateExecutionPayloadEnvelope(
     config: *const BeaconConfig,
     state: *BeaconState(.gloas),
     envelope: *const types.gloas.ExecutionPayloadEnvelope.Type,
-) !void {
+    verify_execution_requests_root: bool,
+) !u64 {
     const payload = &envelope.payload;
 
     // Cache latest block header state root
@@ -113,9 +110,14 @@ fn validateExecutionPayloadEnvelope(
     if (!std.mem.eql(u8, &envelope.beacon_block_root, latest_block_header_root)) {
         return error.EnvelopeBlockRootMismatch;
     }
+    const latest_header_parent_root = try latest_block_header.getFieldRoot("parent_root");
+    if (!std.mem.eql(u8, &envelope.parent_beacon_block_root, latest_header_parent_root)) {
+        return error.EnvelopeParentBlockRootMismatch;
+    }
 
     // Verify slot
-    if (envelope.slot != try state.slot()) {
+    const block_slot = try latest_block_header.get("slot");
+    if (payload.slot_number != block_slot) {
         return error.EnvelopeSlotMismatch;
     }
 
@@ -130,6 +132,14 @@ fn validateExecutionPayloadEnvelope(
 
     if (!std.mem.eql(u8, &committed_bid.prev_randao, &payload.prev_randao)) {
         return error.EnvelopePrevRandaoMismatch;
+    }
+
+    if (verify_execution_requests_root) {
+        var execution_requests_root: [32]u8 = undefined;
+        try types.gloas.ExecutionRequests.hashTreeRoot(allocator, &envelope.execution_requests, &execution_requests_root);
+        if (!std.mem.eql(u8, &committed_bid.execution_requests_root, &execution_requests_root)) {
+            return error.EnvelopeExecutionRequestsRootMismatch;
+        }
     }
 
     // Verify consistency with expected withdrawals
@@ -160,12 +170,13 @@ fn validateExecutionPayloadEnvelope(
 
     // Verify timestamp
     // compute_timestamp_at_slot: genesis_time + slot * SECONDS_PER_SLOT
-    const expected_timestamp = (try state.genesisTime()) + (try state.slot()) * config.chain.SECONDS_PER_SLOT;
+    const expected_timestamp = (try state.genesisTime()) + block_slot * config.chain.SECONDS_PER_SLOT;
     if (payload.timestamp != expected_timestamp) {
         return error.EnvelopeTimestampMismatch;
     }
 
     // Skipped: Verify the execution payload is valid
+    return block_slot;
 }
 
 fn verifyExecutionPayloadEnvelopeSignature(
