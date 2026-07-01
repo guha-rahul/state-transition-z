@@ -22,4 +22,16 @@ pub fn processSlot(state: *AnyBeaconState) !void {
     const previous_block_root = try latest_block_header.hashTreeRoot();
     var block_roots = try state.blockRoots();
     try block_roots.setValue(try state.slot() % preset.SLOTS_PER_HISTORICAL_ROOT, previous_block_root[0..]);
+
+    if (state.forkSeq().gte(.gloas)) {
+        const nextSlotIndex = (try state.slot() + 1) % preset.SLOTS_PER_HISTORICAL_ROOT;
+        switch (state.*) {
+            .gloas => |s| {
+                var executionPayloadAvailability = try s.get("execution_payload_availability");
+                try executionPayloadAvailability.set(nextSlotIndex, false);
+                try s.set("execution_payload_availability", executionPayloadAvailability);
+            },
+            else => {},
+        }
+    }
 }

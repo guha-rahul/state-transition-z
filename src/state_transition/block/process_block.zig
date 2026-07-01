@@ -24,6 +24,7 @@ const processRandao = @import("./process_randao.zig").processRandao;
 const processSyncAggregate = @import("./process_sync_committee.zig").processSyncAggregate;
 const processWithdrawals = @import("./process_withdrawals.zig").processWithdrawals;
 const getExpectedWithdrawals = @import("./process_withdrawals.zig").getExpectedWithdrawals;
+const processParentExecutionPayload = @import("./process_parent_execution_payload.zig").processParentExecutionPayload;
 const isExecutionEnabled = @import("../utils/execution.zig").isExecutionEnabled;
 // TODO: proposer reward api
 // const ProposerRewardType = @import("../types/proposer_reward.zig").ProposerRewardType;
@@ -48,6 +49,9 @@ pub fn processBlock(
 ) !void {
     // Build slashings cache against the *current* latest_block_header slot (pre-header update).
     try buildSlashingsCacheIfNeeded(allocator, state, slashings_cache);
+    if (comptime fork.gte(.gloas) and block_type == .full) {
+        try processParentExecutionPayload(allocator, config, epoch_cache, state, block);
+    }
     try processBlockHeader(fork, allocator, epoch_cache, state, block_type, block);
     // Keep cache slot in sync with latest_block_header without forcing a rebuild.
     slashings_cache.updateLatestBlockSlot(block.slot());
