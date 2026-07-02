@@ -73,7 +73,7 @@ pub fn processEpoch(
     }
 
     if (comptime fork.gte(.gloas)) {
-        timer = time.timestampNow(io);
+        timer = time.start(io);
         try processBuilderPendingPayments(allocator, state, epoch_cache);
         try observeEpochTransitionStep(.{ .step = .process_builder_pending_payments }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
@@ -113,7 +113,7 @@ pub fn processEpoch(
     }
 
     if (comptime fork.gte(.gloas)) {
-        timer = time.timestampNow(io);
+        timer = time.start(io);
         try processPtcWindow(allocator, epoch_cache, state);
         try observeEpochTransitionStep(.{ .step = .process_ptc_window }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }

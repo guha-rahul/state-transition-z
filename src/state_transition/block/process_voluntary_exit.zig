@@ -1,4 +1,3 @@
-const std = @import("std");
 const BeaconConfig = @import("config").BeaconConfig;
 const ForkSeq = @import("config").ForkSeq;
 const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
@@ -59,13 +58,7 @@ pub fn getVoluntaryExitValidity(
     signed_voluntary_exit: *const SignedVoluntaryExit,
     verify_signature: bool,
 ) !VoluntaryExitValidity {
-    const current_epoch = epoch_cache.epoch;
     const voluntary_exit = signed_voluntary_exit.message;
-
-    // Exits must specify an epoch when they become valid; they are not valid before then
-    if (current_epoch < voluntary_exit.epoch) {
-        return .early_epoch;
-    }
 
     var validators = try state.validators();
     const validators_len = try validators.length();
@@ -74,6 +67,7 @@ pub fn getVoluntaryExitValidity(
     }
 
     var validator = try validators.get(@intCast(voluntary_exit.validator_index));
+    const current_epoch = epoch_cache.epoch;
 
     // verify the validator is active
     if (!try isActiveValidatorView(validator, current_epoch)) {
@@ -84,6 +78,11 @@ pub fn getVoluntaryExitValidity(
     const exit_epoch = try validator.get("exit_epoch");
     if (exit_epoch != FAR_FUTURE_EPOCH) {
         return .already_exited;
+    }
+
+    // exits must specify an epoch when they become valid; they are not valid before then
+    if (current_epoch < voluntary_exit.epoch) {
+        return .early_epoch;
     }
 
     // verify the validator had been active long enough
@@ -109,6 +108,7 @@ pub fn getVoluntaryExitValidity(
     return .valid;
 }
 
+const std = @import("std");
 const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
 const Node = @import("persistent_merkle_tree").Node;
 const preset = @import("preset").preset;
