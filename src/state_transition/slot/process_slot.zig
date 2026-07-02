@@ -1,4 +1,5 @@
 const std = @import("std");
+const ForkSeq = @import("config").ForkSeq;
 const AnyBeaconState = @import("fork_types").AnyBeaconState;
 const preset = @import("preset").preset;
 const ZERO_HASH = @import("constants").ZERO_HASH;

@@ -23,7 +23,7 @@ pub fn processBuilderDepositRequest(
         var builder: types.gloas.Builder.Type = undefined;
         try builders.getValue(allocator, idx, &builder);
 
-        if (builder.withdrawable_epoch != c.FAR_FUTURE_EPOCH and builder.balance == 0) {
+        if (builder.withdrawable_epoch != c.FAR_FUTURE_EPOCH) {
             builder.withdrawable_epoch = computeEpochAtSlot(try state.slot()) + config.chain.MIN_BUILDER_WITHDRAWABILITY_DELAY;
         }
 
