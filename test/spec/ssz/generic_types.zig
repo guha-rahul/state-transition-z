@@ -187,18 +187,18 @@ pub const ProgressiveSingleListContainerTestStruct = ssz.VariableProgressiveCont
 
 pub const ProgressiveVarTestStruct = ssz.VariableProgressiveContainerType(struct {
     A: ssz.UintType(8),
-    B: ssz.FixedListType(ssz.UintType(16), 123),
+    B: ssz.FixedListType(ssz.UintType(16), 123, .{}),
     C: ssz.ProgressiveBitListType(),
 }, &[_]u1{ 1, 0, 1, 0, 1 });
 
 pub const ProgressiveComplexTestStruct = ssz.VariableProgressiveContainerType(struct {
     A: ssz.UintType(8),
-    B: ssz.FixedListType(ssz.UintType(16), 123),
+    B: ssz.FixedListType(ssz.UintType(16), 123, .{}),
     C: ssz.ProgressiveBitListType(),
     D: ssz.FixedProgressiveListType(ssz.UintType(64)),
     E: ssz.FixedProgressiveListType(SmallTestStruct),
     F: ssz.VariableProgressiveListType(ssz.VariableProgressiveListType(VarTestStruct)),
-    G: ssz.FixedListType(ProgressiveSingleFieldContainerTestStruct, 10),
+    G: ssz.FixedListType(ProgressiveSingleFieldContainerTestStruct, 10, .{}),
     H: ssz.VariableProgressiveListType(ProgressiveVarTestStruct),
 }, &[_]u1{ 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1 });
 

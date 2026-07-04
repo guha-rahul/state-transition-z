@@ -213,11 +213,11 @@ pub fn fillWithContents(allocator: std.mem.Allocator, pool: *Node.Pool, nodes: [
     const subtree_count = subtreeIndex(nodes.len);
     var n: Node.Id = @enumFromInt(0);
 
-    var subtree_starts = std.ArrayList(usize).init(allocator);
-    defer subtree_starts.deinit();
+    var subtree_starts = std.ArrayList(usize).empty;
+    defer subtree_starts.deinit(allocator);
     var pos: usize = 0;
     for (0..subtree_count) |subtree_i| {
-        try subtree_starts.append(pos);
+        try subtree_starts.append(allocator, pos);
         pos += @min(subtreeLength(subtree_i), nodes.len - pos);
     }
 

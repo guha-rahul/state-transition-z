@@ -94,7 +94,9 @@ pub fn FixedProgressiveContainerType(comptime ST: type, comptime active_fields: 
         }
     }
 
-    comptime var native_fields: [ssz_fields.len]std.builtin.Type.StructField = undefined;
+    comptime var native_names: [ssz_fields.len][:0]const u8 = undefined;
+    comptime var native_types: [ssz_fields.len]type = undefined;
+    comptime var native_attrs: [ssz_fields.len]std.builtin.Type.StructField.Attributes = undefined;
     comptime var _offsets: [ssz_fields.len]usize = undefined;
     comptime var _fixed_size: usize = 0;
     inline for (ssz_fields, 0..) |field, i| {
@@ -102,26 +104,14 @@ pub fn FixedProgressiveContainerType(comptime ST: type, comptime active_fields: 
             @compileError("FixedProgressiveContainerType must only contain fixed fields");
         }
 
-        native_fields[i] = .{
-            .name = field.name,
-            .type = field.type.Type,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(field.type.Type),
-        };
+        native_names[i] = field.name;
+        native_types[i] = field.type.Type;
+        native_attrs[i] = .{};
         _offsets[i] = _fixed_size;
         _fixed_size += field.type.fixed_size;
     }
 
-    const T = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .backing_integer = null,
-            .fields = native_fields[0..],
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_tuple = false,
-        },
-    });
+    const T = @Struct(.auto, null, &native_names, &native_types, &native_attrs);
 
     return struct {
         pub const kind = TypeKind.progressive_container;
@@ -349,7 +339,9 @@ pub fn VariableProgressiveContainerType(comptime ST: type, comptime active_field
         }
     }
 
-    comptime var native_fields: [ssz_fields.len]std.builtin.Type.StructField = undefined;
+    comptime var native_names: [ssz_fields.len][:0]const u8 = undefined;
+    comptime var native_types: [ssz_fields.len]type = undefined;
+    comptime var native_attrs: [ssz_fields.len]std.builtin.Type.StructField.Attributes = undefined;
     comptime var _offsets: [ssz_fields.len]usize = undefined;
     comptime var _min_size: usize = 0;
     comptime var _max_size: usize = 0;
@@ -375,13 +367,9 @@ pub fn VariableProgressiveContainerType(comptime ST: type, comptime active_field
             _fixed_end += 4;
         }
 
-        native_fields[i] = .{
-            .name = field.name,
-            .type = field.type.Type,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = @alignOf(field.type.Type),
-        };
+        native_names[i] = field.name;
+        native_types[i] = field.type.Type;
+        native_attrs[i] = .{};
     }
 
     comptime {
@@ -392,15 +380,7 @@ pub fn VariableProgressiveContainerType(comptime ST: type, comptime active_field
 
     const var_count = ssz_fields.len - _fixed_count;
 
-    const T = @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .backing_integer = null,
-            .fields = native_fields[0..],
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_tuple = false,
-        },
-    });
+    const T = @Struct(.auto, null, &native_names, &native_types, &native_attrs);
 
     return struct {
         pub const kind = TypeKind.progressive_container;
@@ -811,9 +791,9 @@ test "ProgressiveContainerType " {
 test "ProgressiveContainerType - variable" {
     const allocator = std.testing.allocator;
     const Foo = VariableProgressiveContainerType(struct {
-        a: FixedListType(UintType(8), 32),
-        b: FixedListType(UintType(8), 32),
-        c: FixedListType(UintType(8), 32),
+        a: FixedListType(UintType(8), 32, .{}),
+        b: FixedListType(UintType(8), 32, .{}),
+        c: FixedListType(UintType(8), 32, .{}),
     }, &[_]u1{ 1, 1, 0, 1 });
 
     var f: Foo.Type = undefined;

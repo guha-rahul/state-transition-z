@@ -32,25 +32,17 @@ fn selectorPadded(selector: u8) [32]u8 {
 fn UnionTagType(comptime options: anytype) type {
     const fields_count = options.len;
 
-    comptime var enum_fields: [fields_count]std.builtin.Type.EnumField = undefined;
+    comptime var enum_names: [fields_count][:0]const u8 = undefined;
+    comptime var enum_values: [fields_count]u8 = undefined;
     inline for (options, 0..) |option, i| {
         const selector = option.@"0";
         const name = std.fmt.comptimePrint("option_{d}", .{selector});
 
-        enum_fields[i] = .{
-            .name = name,
-            .value = selector, // Use selector value directly
-        };
+        enum_names[i] = name;
+        enum_values[i] = selector;
     }
 
-    return @Type(.{
-        .@"enum" = .{
-            .tag_type = u8,
-            .fields = &enum_fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_exhaustive = true,
-        },
-    });
+    return @Enum(u8, .exhaustive, &enum_names, &enum_values);
 }
 
 /// Creates a tagged union type for the data portion
@@ -58,7 +50,9 @@ fn UnionDataType(comptime options: anytype) type {
     const fields_count = options.len;
 
     // Build union fields from options
-    comptime var union_fields: [fields_count]std.builtin.Type.UnionField = undefined;
+    comptime var union_names: [fields_count][:0]const u8 = undefined;
+    comptime var union_types: [fields_count]type = undefined;
+    comptime var union_attrs: [fields_count]std.builtin.Type.UnionField.Attributes = undefined;
     inline for (options, 0..) |option, i| {
         const selector = option.@"0";
         const option_type = option.@"1";
@@ -66,21 +60,12 @@ fn UnionDataType(comptime options: anytype) type {
         // Create a sentinel-terminated field name
         const name = std.fmt.comptimePrint("option_{d}", .{selector});
 
-        union_fields[i] = .{
-            .name = name,
-            .type = option_type.Type,
-            .alignment = @alignOf(option_type.Type),
-        };
+        union_names[i] = name;
+        union_types[i] = option_type.Type;
+        union_attrs[i] = .{ .@"align" = @alignOf(option_type.Type) };
     }
 
-    return @Type(.{
-        .@"union" = .{
-            .layout = .auto,
-            .tag_type = UnionTagType(options),
-            .fields = &union_fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-        },
-    });
+    return @Union(.auto, UnionTagType(options), &union_names, &union_types, &union_attrs);
 }
 
 pub fn CompatibleUnionType(comptime options: anytype) type {

@@ -153,6 +153,6 @@ pub const HasherData = struct {
     }
 
     pub fn getAllocator(self: *HasherData) std.mem.Allocator {
-        return self.chunks.allocator;
+        return self.allocator;
     }
 };
