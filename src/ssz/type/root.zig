@@ -37,6 +37,7 @@ pub const itemsPerChunk = chunk.itemsPerChunk;
 pub const chunkCount = chunk.chunkCount;
 pub const chunkDepth = chunk.chunkDepth;
 pub const getPathGindex = @import("path.zig").getPathGindex;
+pub const treeApi = @import("tree_api.zig");
 
 pub const FixedProgressiveContainerType = @import("progressive_container.zig").FixedProgressiveContainerType;
 pub const VariableProgressiveContainerType = @import("progressive_container.zig").VariableProgressiveContainerType;
@@ -65,4 +66,5 @@ test {
     _ = @import("progressive_container.zig");
     _ = @import("compatible_union.zig");
     _ = @import("path.zig");
+    _ = @import("tree_api.zig");
 }

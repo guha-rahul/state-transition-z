@@ -6,6 +6,7 @@ const ssz = @import("ssz");
 const Node = @import("persistent_merkle_tree").Node;
 
 const Allocator = std.mem.Allocator;
+const tree_api = ssz.treeApi;
 
 pub fn parseYaml(comptime ST: type, allocator: Allocator, y: yaml.Yaml, out: *ST.Type) !void {
     if (comptime ssz.isBitVectorType(ST)) {
@@ -297,7 +298,7 @@ pub fn validTestCase(comptime ST: type, gpa: Allocator, path: std.Io.Dir, meta_f
 
     // test conversion between tree and value
     {
-        const node = try ST.tree.fromValue(&pool, value_expected);
+        const node = try tree_api.fromValue(ST, allocator, &pool, value_expected);
         defer pool.unref(node);
 
         try std.testing.expectEqualSlices(u8, &root_expected, node.getRoot(&pool));
@@ -314,8 +315,8 @@ pub fn validTestCase(comptime ST: type, gpa: Allocator, path: std.Io.Dir, meta_f
     }
 
     // test conversion between tree and serialized
-    {
-        const node = try ST.tree.deserializeFromBytes(&pool, serialized_expected);
+    if (comptime tree_api.supportsDeserializeFromBytes(ST)) {
+        const node = try tree_api.deserializeFromBytes(ST, allocator, &pool, serialized_expected);
         defer pool.unref(node);
 
         try std.testing.expectEqualSlices(u8, &root_expected, node.getRoot(&pool));

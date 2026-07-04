@@ -5,6 +5,7 @@ const TypeKind = @import("type_kind.zig").TypeKind;
 
 const isFixedType = @import("type_kind.zig").isFixedType;
 const isBasicType = @import("type_kind.zig").isBasicType;
+const tree_api = @import("tree_api.zig");
 
 const merkleize = @import("hashing").merkleize;
 const maxChunksToDepth = @import("hashing").maxChunksToDepth;
@@ -813,7 +814,7 @@ pub fn VariableContainerType(comptime ST: type) type {
 
                 inline for (fields, 0..) |field, i| {
                     const field_value = &@field(value, field.name);
-                    nodes[i] = try field.type.tree.fromValue(pool, field_value);
+                    nodes[i] = try tree_api.fromValue(field.type, pool.allocator, pool, field_value);
                 }
                 return try Node.fillWithContents(pool, &nodes, chunk_depth);
             }
