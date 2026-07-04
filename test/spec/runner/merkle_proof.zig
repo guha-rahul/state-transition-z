@@ -7,7 +7,6 @@ const hex = @import("hex");
 const ssz = @import("ssz");
 
 const pmt = @import("persistent_merkle_tree");
-const proof = pmt.proof;
 const Node = pmt.Node;
 const Gindex = pmt.Gindex;
 
@@ -30,7 +29,7 @@ const MerkleProof = struct {
 };
 
 pub fn TestCase(comptime fork: ForkSeq) type {
-    const ForkTypes = @field(ct, fork.forkName());
+    const ForkTypes = @field(ct, fork.name());
     const BeaconBlockBody = ForkTypes.BeaconBlockBody;
     const KzgCommitment = ct.primitive.KZGCommitment;
 
@@ -42,14 +41,14 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         const Self = @This();
 
-        pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
+        pub fn execute(allocator: std.mem.Allocator, dir: std.Io.Dir) !void {
             var tc = try Self.init(allocator, dir);
             defer tc.deinit();
 
             try tc.runTest();
         }
 
-        fn init(allocator: std.mem.Allocator, dir: std.fs.Dir) !Self {
+        fn init(allocator: std.mem.Allocator, dir: std.Io.Dir) !Self {
             var body = BeaconBlockBody.default_value;
             errdefer {
                 if (comptime @hasDecl(BeaconBlockBody, "deinit")) {
@@ -96,10 +95,11 @@ pub fn TestCase(comptime fork: ForkSeq) type {
                 try KzgCommitment.hashTreeRoot(&self.body.blob_kzg_commitments.items[0], &actual_leaf);
             }
 
-            var pool = try Node.Pool.init(self.allocator, 2048);
+            var pool = try Node.Pool.init(.{ .page_allocator = self.allocator, .allocator = self.allocator, .pool_size = 2048 });
             defer pool.deinit();
 
-            const root_node = try BeaconBlockBody.tree.fromValue(self.allocator, &pool, &self.body);
+            const root_node = try BeaconBlockBody.tree.fromValue(&pool, &self.body);
+            defer pool.unref(root_node);
 
             var single_proof = try pmt.proof.createSingleProof(self.allocator, &pool, root_node, gindex);
             defer single_proof.deinit(self.allocator);
@@ -138,11 +138,8 @@ pub fn TestCase(comptime fork: ForkSeq) type {
             }
         }
 
-        fn loadProof(allocator: std.mem.Allocator, dir: std.fs.Dir, out: *MerkleProof) !void {
-            var file = try dir.openFile("proof.yaml", .{});
-            defer file.close();
-
-            const contents = try file.readToEndAlloc(allocator, 4096);
+        fn loadProof(allocator: std.mem.Allocator, dir: std.Io.Dir, out: *MerkleProof) !void {
+            const contents = try dir.readFileAlloc(std.testing.io, "proof.yaml", allocator, .unlimited);
             defer allocator.free(contents);
 
             out.* = try parseProofYaml(allocator, contents);

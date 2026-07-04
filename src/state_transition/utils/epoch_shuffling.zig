@@ -3,14 +3,17 @@ const Allocator = std.mem.Allocator;
 const types = @import("consensus_types");
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 const preset = @import("preset").preset;
-const BeaconStateAllForks = @import("../types/beacon_state.zig").BeaconStateAllForks;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
 const getSeed = @import("./seed.zig").getSeed;
 const c = @import("constants");
 const innerShuffleList = @import("./shuffle.zig").innerShuffleList;
 const Epoch = types.primitive.Epoch.Type;
-const ReferenceCount = @import("./reference_count.zig").ReferenceCount;
+const computeStartSlotAtEpoch = @import("./epoch.zig").computeStartSlotAtEpoch;
+const getBlockRootAtSlot = @import("./block_root.zig").getBlockRootAtSlot;
+const AnchorCheckpoint = @import("../AnchorCheckpoint.zig");
+const RefCount = @import("./ref_count.zig").RefCount;
 
-pub const EpochShufflingRc = ReferenceCount(*EpochShuffling);
+pub const EpochShufflingRc = RefCount(*EpochShuffling);
 
 const Committee = []const ValidatorIndex;
 const SlotCommittees = []const Committee;
@@ -18,7 +21,7 @@ const EpochCommittees = [preset.SLOTS_PER_EPOCH]SlotCommittees;
 
 /// EpochCache is the only consumer of this cache but an instance of EpochShuffling is shared across EpochCache instances
 /// no EpochCache instance takes the ownership of shuffling
-/// instead of that, we count on reference counting to deallocate the memory, see ReferenceCount() utility
+/// instead of that, we count on reference counting to deallocate the memory, see RefCount() utility
 pub const EpochShuffling = struct {
     allocator: Allocator,
 
@@ -102,10 +105,14 @@ test EpochShuffling {
     }
 }
 
-/// active_indices is allocated at consumer side and transfer ownership to EpochShuffling
-pub fn computeEpochShuffling(allocator: Allocator, state: *const BeaconStateAllForks, active_indices: []ValidatorIndex, epoch: Epoch) !*EpochShuffling {
+/// Takes ownership of the given `active_indices`.
+pub fn computeEpochShuffling(allocator: Allocator, state: *AnyBeaconState, active_indices: []ValidatorIndex, epoch: Epoch) !*EpochShuffling {
+    errdefer allocator.free(active_indices);
+
     var seed = [_]u8{0} ** 32;
-    try getSeed(state, epoch, c.DOMAIN_BEACON_ATTESTER, &seed);
+    switch (state.forkSeq()) {
+        inline else => |f| try getSeed(f, state.castToFork(f), epoch, c.DOMAIN_BEACON_ATTESTER, &seed),
+    }
     return EpochShuffling.init(allocator, seed, epoch, active_indices);
 }
 
@@ -131,4 +138,26 @@ fn computeCommitteeCount(active_validator_count: usize) usize {
 test computeCommitteeCount {
     const committee_count = computeCommitteeCount(2_000_000);
     try std.testing.expectEqual(64, committee_count);
+}
+
+/// Calculate the decision root for a given epoch.
+pub fn calculateDecisionRoot(state: *AnyBeaconState, epoch: Epoch) ![32]u8 {
+    const pivot_slot = computeStartSlotAtEpoch(epoch -| 1) -| 1;
+    const block_root = switch (state.forkSeq()) {
+        inline else => |f| try getBlockRootAtSlot(f, state.castToFork(f), pivot_slot),
+    };
+
+    return block_root.*;
+}
+
+/// Get the shuffling decision block root for the given epoch of given state.
+pub fn calculateShufflingDecisionRoot(state: *AnyBeaconState, epoch: Epoch) ![32]u8 {
+    const slot = try state.slot();
+
+    if (slot > c.GENESIS_SLOT) {
+        return try calculateDecisionRoot(state, epoch);
+    }
+
+    const anchor = try AnchorCheckpoint.fromState(state);
+    return anchor.checkpoint.root;
 }

@@ -1,9 +1,16 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
-const ssz = @import("consensus_types");
+const BeaconConfig = @import("config").BeaconConfig;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
+const BeaconState = @import("fork_types").BeaconState;
+const ct = @import("consensus_types");
 
-pub fn upgradeStateToCapella(allocator: Allocator, cached_state: *CachedBeaconStateAllForks) !void {
+pub fn upgradeStateToCapella(
+    allocator: Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    bellatrix_state: *BeaconState(.bellatrix),
+) !BeaconState(.capella) {
     // Get underlying node and cast bellatrix tree to capella tree
     //
     // An bellatrix BeaconState tree can be safely casted to a capella BeaconState tree because:
@@ -41,46 +48,31 @@ pub fn upgradeStateToCapella(allocator: Allocator, cached_state: *CachedBeaconSt
     // -                                | new   | next_withdrawal_validator_index
     // -                                | new   | historical_summaries
 
-    var state = cached_state.state;
-    if (!state.isBellatrix()) {
-        return error.StateIsNotBellatrix;
-    }
+    var state = try bellatrix_state.upgradeUnsafe();
+    errdefer state.deinit();
 
-    const bellatrix_state = state.bellatrix;
-    defer {
-        ssz.bellatrix.BeaconState.deinit(allocator, bellatrix_state);
-        allocator.destroy(bellatrix_state);
-    }
-    _ = try state.upgradeUnsafe(allocator);
-    state.forkPtr().* = .{
-        .previous_version = bellatrix_state.fork.current_version,
-        .current_version = cached_state.config.chain.CAPELLA_FORK_VERSION,
-        .epoch = cached_state.getEpochCache().epoch,
+    const new_fork: ct.phase0.Fork.Type = .{
+        .previous_version = try bellatrix_state.forkCurrentVersion(),
+        .current_version = config.chain.CAPELLA_FORK_VERSION,
+        .epoch = epoch_cache.epoch,
     };
+    try state.setFork(&new_fork);
 
-    var capella_latest_execution_payload_header = ssz.capella.ExecutionPayloadHeader.default_value;
-    const bellatrix_latest_execution_payload_header = bellatrix_state.latest_execution_payload_header;
+    var new_latest_execution_payload_header = ct.capella.ExecutionPayloadHeader.default_value;
+    var bellatrix_latest_execution_payload_header = ct.bellatrix.ExecutionPayloadHeader.default_value;
+    try bellatrix_state.latestExecutionPayloadHeader(allocator, &bellatrix_latest_execution_payload_header);
+    defer ct.bellatrix.ExecutionPayloadHeader.deinit(allocator, &bellatrix_latest_execution_payload_header);
 
-    capella_latest_execution_payload_header.parent_hash = bellatrix_latest_execution_payload_header.parent_hash;
-    capella_latest_execution_payload_header.fee_recipient = bellatrix_latest_execution_payload_header.fee_recipient;
-    capella_latest_execution_payload_header.state_root = bellatrix_latest_execution_payload_header.state_root;
-    capella_latest_execution_payload_header.receipts_root = bellatrix_latest_execution_payload_header.receipts_root;
-    capella_latest_execution_payload_header.logs_bloom = bellatrix_latest_execution_payload_header.logs_bloom;
-    capella_latest_execution_payload_header.prev_randao = bellatrix_latest_execution_payload_header.prev_randao;
-    capella_latest_execution_payload_header.block_number = bellatrix_latest_execution_payload_header.block_number;
-    capella_latest_execution_payload_header.gas_limit = bellatrix_latest_execution_payload_header.gas_limit;
-    capella_latest_execution_payload_header.gas_used = bellatrix_latest_execution_payload_header.gas_used;
-    capella_latest_execution_payload_header.timestamp = bellatrix_latest_execution_payload_header.timestamp;
-    // Clone extra_data because bellatrix_state will be deinit after upgrade,
-    // and capella state needs its own copy of the dynamically allocated data
-    capella_latest_execution_payload_header.extra_data = try bellatrix_latest_execution_payload_header.extra_data.clone(allocator);
-    capella_latest_execution_payload_header.base_fee_per_gas = bellatrix_latest_execution_payload_header.base_fee_per_gas;
-    capella_latest_execution_payload_header.block_hash = bellatrix_latest_execution_payload_header.block_hash;
-    capella_latest_execution_payload_header.transactions_root = bellatrix_latest_execution_payload_header.transactions_root;
+    try ct.bellatrix.ExecutionPayloadHeader.clone(
+        allocator,
+        &bellatrix_latest_execution_payload_header,
+        &new_latest_execution_payload_header,
+    );
     // new in capella
-    capella_latest_execution_payload_header.withdrawals_root = [_]u8{0} ** 32;
+    new_latest_execution_payload_header.withdrawals_root = [_]u8{0} ** 32;
 
-    state.setLatestExecutionPayloadHeader(allocator, .{
-        .capella = &capella_latest_execution_payload_header,
-    });
+    try state.setLatestExecutionPayloadHeader(&new_latest_execution_payload_header);
+
+    bellatrix_state.deinit();
+    return state;
 }

@@ -1,27 +1,29 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
 const ForkSeq = @import("config").ForkSeq;
-const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
-const types = @import("consensus_types");
-const preset = @import("preset").preset;
+const BeaconState = @import("fork_types").BeaconState;
 
-pub fn processParticipationFlagUpdates(allocator: std.mem.Allocator, cached_state: *CachedBeaconStateAllForks) !void {
-    const state = cached_state.state;
-    // rotate EpochParticipation
-    try state.rotateEpochParticipations(allocator);
+pub fn processParticipationFlagUpdates(
+    comptime fork: ForkSeq,
+    state: *BeaconState(fork),
+) !void {
+    if (comptime fork.lt(.altair)) return;
+    try state.rotateEpochParticipation();
+}
 
-    // We need to replace the node of currentEpochParticipation with a node that represents an empty list of some length.
-    // SSZ represents a list as = new BranchNode(chunksNode, lengthNode).
-    // Since the chunks represent all zero'ed data we can re-use the pre-computed zeroNode at chunkDepth to skip any
-    // data transformation and create the required tree almost for free.
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+const Node = @import("persistent_merkle_tree").Node;
 
-    // TODO(ct) implement this using TreeView
-    //   const currentEpochParticipationNode = types.altair.EpochParticipation.tree_setChunksNode(
-    //   state.currentEpochParticipation.node,
-    //   zeroNode(types.altair.EpochParticipation.chunkDepth),
-    //   state.currentEpochParticipation.length
-    // );
+test "processParticipationFlagUpdates - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
 
-    // state.currentEpochParticipation = types.altair.EpochParticipation.getViewDU(currentEpochParticipationNode);
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
+
+    try processParticipationFlagUpdates(
+        .electra,
+        test_state.cached_state.state.castToFork(.electra),
+    );
 }

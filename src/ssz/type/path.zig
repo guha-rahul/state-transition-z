@@ -1,5 +1,4 @@
 const std = @import("std");
-const isFixedType = @import("type_kind.zig").isFixedType;
 const isBasicType = @import("type_kind.zig").isBasicType;
 const Gindex = @import("persistent_merkle_tree").Gindex;
 const BYTES_PER_CHUNK = @import("root.zig").BYTES_PER_CHUNK;
@@ -224,7 +223,7 @@ test "getPathGindex" {
 
     try std.testing.expectEqual(@as(Gindex.Uint, 7), @intFromEnum(getPathGindex(BeaconState, "finalized_checkpoint.root")));
 
-    const Balances = types.FixedListType(types.UintType(64), 4);
+    const Balances = types.FixedListType(types.UintType(64), 4, .{});
     const SimpleState = types.VariableContainerType(struct {
         slot: types.UintType(64),
         balances: Balances,

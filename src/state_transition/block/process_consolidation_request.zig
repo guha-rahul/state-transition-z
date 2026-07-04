@@ -1,5 +1,8 @@
 const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
+const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
+const BeaconState = @import("fork_types").BeaconState;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const types = @import("consensus_types");
 const preset = @import("preset").preset;
 const FAR_FUTURE_EPOCH = @import("constants").FAR_FUTURE_EPOCH;
@@ -15,30 +18,28 @@ const computeConsolidationEpochAndUpdateChurn = @import("../utils/epoch.zig").co
 const validator_utils = @import("../utils/validator.zig");
 const getConsolidationChurnLimit = validator_utils.getConsolidationChurnLimit;
 const getPendingBalanceToWithdraw = validator_utils.getPendingBalanceToWithdraw;
-const isActiveValidator = validator_utils.isActiveValidator;
+const isActiveValidatorView = validator_utils.isActiveValidatorView;
 
 // TODO Electra: Clean up necessary as there is a lot of overlap with isValidSwitchToCompoundRequest
 pub fn processConsolidationRequest(
-    allocator: std.mem.Allocator,
-    cached_state: *CachedBeaconStateAllForks,
+    comptime fork: ForkSeq,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
     consolidation: *const ConsolidationRequest,
 ) !void {
-    const state = cached_state.state;
-    const epoch_cache = cached_state.getEpochCache();
-    const config = epoch_cache.config;
-
     const source_pubkey = consolidation.source_pubkey;
     const target_pubkey = consolidation.target_pubkey;
     const source_address = consolidation.source_address;
 
-    if (!isPubkeyKnown(cached_state, source_pubkey)) return;
-    if (!isPubkeyKnown(cached_state, target_pubkey)) return;
+    if (!(try isPubkeyKnown(fork, epoch_cache, state, source_pubkey))) return;
+    if (!(try isPubkeyKnown(fork, epoch_cache, state, target_pubkey))) return;
 
-    const source_index = epoch_cache.pubkey_to_index.get(&source_pubkey) orelse return;
-    const target_index = epoch_cache.pubkey_to_index.get(&target_pubkey) orelse return;
+    const source_index = epoch_cache.pubkey_to_index.get(source_pubkey) orelse return;
+    const target_index = epoch_cache.pubkey_to_index.get(target_pubkey) orelse return;
 
-    if (isValidSwitchToCompoundRequest(cached_state, consolidation)) {
-        try switchToCompoundingValidator(allocator, cached_state, source_index);
+    if (try isValidSwitchToCompoundRequest(fork, epoch_cache, state, consolidation)) {
+        try switchToCompoundingValidator(fork, state, source_index);
         // Early return since we have already switched validator to compounding
         return;
     }
@@ -49,7 +50,8 @@ pub fn processConsolidationRequest(
     }
 
     // If the pending consolidations queue is full, consolidation requests are ignored
-    if (state.pendingConsolidations().items.len >= preset.PENDING_CONSOLIDATIONS_LIMIT) {
+    var pending_consolidations = try state.pendingConsolidations();
+    if (try pending_consolidations.length() >= preset.PENDING_CONSOLIDATIONS_LIMIT) {
         return;
     }
 
@@ -58,71 +60,81 @@ pub fn processConsolidationRequest(
         return;
     }
 
-    const source_validator = &state.validators().items[source_index];
-    const target_validator = &state.validators().items[target_index];
-    const source_withdrawal_address = source_validator.withdrawal_credentials[12..];
+    var validators = try state.validators();
+    var source_validator = try validators.get(@intCast(source_index));
+    var target_validator = try validators.get(@intCast(target_index));
+    const source_withdrawal_credentials = try source_validator.getFieldRoot("withdrawal_credentials");
+    const target_withdrawal_credentials = try target_validator.getFieldRoot("withdrawal_credentials");
+    const source_withdrawal_address = source_withdrawal_credentials[12..];
     const current_epoch = epoch_cache.epoch;
 
     // Verify source withdrawal credentials
-    const has_correct_credential = hasExecutionWithdrawalCredential(source_validator.withdrawal_credentials);
+    const has_correct_credential = hasExecutionWithdrawalCredential(source_withdrawal_credentials);
     const is_correct_source_address = std.mem.eql(u8, source_withdrawal_address, &source_address);
     if (!(has_correct_credential and is_correct_source_address)) {
         return;
     }
 
     // Verify that target has compounding withdrawal credentials
-    if (!hasCompoundingWithdrawalCredential(target_validator.withdrawal_credentials)) {
+    if (!hasCompoundingWithdrawalCredential(target_withdrawal_credentials)) {
         return;
     }
 
     // Verify the source and the target are active
-    if (!isActiveValidator(source_validator, current_epoch) or !isActiveValidator(target_validator, current_epoch)) {
+    if (!(try isActiveValidatorView(source_validator, current_epoch)) or !(try isActiveValidatorView(target_validator, current_epoch))) {
         return;
     }
 
     // Verify exits for source and target have not been initiated
-    if (source_validator.exit_epoch != FAR_FUTURE_EPOCH or target_validator.exit_epoch != FAR_FUTURE_EPOCH) {
+    const source_exit_epoch = try source_validator.get("exit_epoch");
+    const target_exit_epoch = try target_validator.get("exit_epoch");
+    if (source_exit_epoch != FAR_FUTURE_EPOCH or target_exit_epoch != FAR_FUTURE_EPOCH) {
         return;
     }
 
     // Verify the source has been active long enough
-    if (current_epoch < source_validator.activation_epoch + config.chain.SHARD_COMMITTEE_PERIOD) {
+    const source_activation_epoch = try source_validator.get("activation_epoch");
+    if (current_epoch < source_activation_epoch + config.chain.SHARD_COMMITTEE_PERIOD) {
         return;
     }
 
     // Verify the source has no pending withdrawals in the queue
-    if (getPendingBalanceToWithdraw(cached_state.state, source_index) > 0) {
+    if (try getPendingBalanceToWithdraw(fork, state, source_index) > 0) {
         return;
     }
 
     // Initiate source validator exit and append pending consolidation
-    // TODO Electra: See if we can get rid of big int
-    const exit_epoch = computeConsolidationEpochAndUpdateChurn(cached_state, source_validator.effective_balance);
-    source_validator.exit_epoch = exit_epoch;
-    source_validator.withdrawable_epoch = exit_epoch + config.chain.MIN_VALIDATOR_WITHDRAWABILITY_DELAY;
+    const effective_balance = try source_validator.get("effective_balance");
+    const exit_epoch = try computeConsolidationEpochAndUpdateChurn(fork, epoch_cache, state, effective_balance);
+    try source_validator.set("exit_epoch", exit_epoch);
+    try source_validator.set("withdrawable_epoch", exit_epoch + config.chain.MIN_VALIDATOR_WITHDRAWABILITY_DELAY);
 
     const pending_consolidation = PendingConsolidation{
         .source_index = source_index,
         .target_index = target_index,
     };
-    try state.pendingConsolidations().append(allocator, pending_consolidation);
+    try pending_consolidations.pushValue(&pending_consolidation);
 }
 
-fn isValidSwitchToCompoundRequest(cached_state: *const CachedBeaconStateAllForks, consolidation: *const ConsolidationRequest) bool {
-    const state = cached_state.state;
-    const epoch_cache = cached_state.getEpochCache();
-
+fn isValidSwitchToCompoundRequest(
+    comptime fork: ForkSeq,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
+    consolidation: *const ConsolidationRequest,
+) !bool {
     // this check is mainly to make the compiler happy, pubkey is checked by the consumer already
-    const source_index = epoch_cache.pubkey_to_index.get(&consolidation.source_pubkey) orelse return false;
-    const target_index = epoch_cache.pubkey_to_index.get(&consolidation.target_pubkey) orelse return false;
+    const source_index = epoch_cache.pubkey_to_index.get(consolidation.source_pubkey) orelse return false;
+    const target_index = epoch_cache.pubkey_to_index.get(consolidation.target_pubkey) orelse return false;
 
     // Switch to compounding requires source and target be equal
     if (source_index != target_index) {
         return false;
     }
 
-    const source_validator = state.validators().items[source_index];
-    const source_withdrawal_address = source_validator.withdrawal_credentials[12..];
+    var validators = try state.validators();
+    var source_validator = try validators.get(@intCast(source_index));
+    const source_withdrawal_credentials = try source_validator.getFieldRoot("withdrawal_credentials");
+    const source_withdrawal_address = source_withdrawal_credentials[12..];
 
     // Verify request has been authorized
     if (std.mem.eql(u8, source_withdrawal_address, &consolidation.source_address) == false) {
@@ -130,17 +142,17 @@ fn isValidSwitchToCompoundRequest(cached_state: *const CachedBeaconStateAllForks
     }
 
     // Verify source withdrawal credentials
-    if (!hasEth1WithdrawalCredential(source_validator.withdrawal_credentials)) {
+    if (!hasEth1WithdrawalCredential(source_withdrawal_credentials)) {
         return false;
     }
 
     // Verify the source is active
-    if (!isActiveValidator(&source_validator, epoch_cache.epoch)) {
+    if (!try isActiveValidatorView(source_validator, epoch_cache.epoch)) {
         return false;
     }
 
     // Verify exit for source has not been initiated
-    if (source_validator.exit_epoch != FAR_FUTURE_EPOCH) {
+    if (try source_validator.get("exit_epoch") != FAR_FUTURE_EPOCH) {
         return false;
     }
 

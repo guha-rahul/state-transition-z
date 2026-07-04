@@ -1,6 +1,12 @@
 const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
+const metrics = @import("../metrics.zig");
+const observeEpochTransitionStep = metrics.observeEpochTransitionStep;
+const time = @import("time");
+
 const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
+const BeaconState = @import("fork_types").BeaconState;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
 const processJustificationAndFinalization = @import("./process_justification_and_finalization.zig").processJustificationAndFinalization;
 const processInactivityUpdates = @import("./process_inactivity_updates.zig").processInactivityUpdates;
@@ -18,56 +24,105 @@ const processHistoricalRootsUpdate = @import("./process_historical_roots_update.
 const processParticipationRecordUpdates = @import("./process_participation_record_updates.zig").processParticipationRecordUpdates;
 const processParticipationFlagUpdates = @import("./process_participation_flag_updates.zig").processParticipationFlagUpdates;
 const processSyncCommitteeUpdates = @import("./process_sync_committee_updates.zig").processSyncCommitteeUpdates;
-const processProposerLookahead = @import("../utils/process_proposer_lookahead.zig").processProposerLookahead;
+const processProposerLookahead = @import("./process_proposer_lookahead.zig").processProposerLookahead;
+const Node = @import("persistent_merkle_tree").Node;
 
-// TODO: add metrics
-pub fn processEpoch(allocator: std.mem.Allocator, cached_state: *CachedBeaconStateAllForks, cache: *EpochTransitionCache) !void {
-    const state = cached_state.state;
-    try processJustificationAndFinalization(cached_state, cache);
+pub fn processEpoch(
+    comptime fork: ForkSeq,
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    config: *const BeaconConfig,
+    epoch_cache: *EpochCache,
+    state: *BeaconState(fork),
+    cache: *EpochTransitionCache,
+) !void {
+    var timer = time.start(io);
+    try processJustificationAndFinalization(fork, state, cache);
+    try observeEpochTransitionStep(.{ .step = .process_justification_and_finalization }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
 
-    if (state.isPostAltair()) {
-        try processInactivityUpdates(cached_state, cache);
+    if (comptime fork.gte(.altair)) {
+        timer = time.start(io);
+        try processInactivityUpdates(fork, allocator, config, epoch_cache, state, cache);
+        try observeEpochTransitionStep(.{ .step = .process_inactivity_updates }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
 
-    try processRegistryUpdates(cached_state, cache);
+    timer = time.start(io);
+    try processRegistryUpdates(fork, config, epoch_cache, state, cache);
+    try observeEpochTransitionStep(.{ .step = .process_registry_updates }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
 
-    // TODO(bing): In lodestar-ts we accumulate slashing penalties and only update in processRewardsAndPenalties. Do the same?
-    try processSlashings(allocator, cached_state, cache);
+    timer = time.start(io);
+    const slashing_penalties = try processSlashings(fork, allocator, epoch_cache, state, cache, false);
+    try observeEpochTransitionStep(.{ .step = .process_slashings }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
 
-    try processRewardsAndPenalties(allocator, cached_state, cache);
+    timer = time.start(io);
+    try processRewardsAndPenalties(fork, allocator, config, epoch_cache, state, cache, slashing_penalties);
+    try observeEpochTransitionStep(.{ .step = .process_rewards_and_penalties }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
 
-    processEth1DataReset(allocator, cached_state, cache);
+    try processEth1DataReset(fork, state, cache);
 
-    if (state.isPostElectra()) {
-        try processPendingDeposits(allocator, cached_state, cache);
-        try processPendingConsolidations(allocator, cached_state, cache);
+    if (comptime fork.gte(.electra)) {
+        timer = time.start(io);
+        try processPendingDeposits(fork, allocator, config, epoch_cache, state, cache);
+        try observeEpochTransitionStep(.{ .step = .process_pending_deposits }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
+
+        timer = time.start(io);
+        try processPendingConsolidations(fork, epoch_cache, state, cache);
+        try observeEpochTransitionStep(.{ .step = .process_pending_consolidations }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
 
     // const numUpdate = processEffectiveBalanceUpdates(fork, state, cache);
-    _ = try processEffectiveBalanceUpdates(cached_state, cache);
+    timer = time.start(io);
+    _ = try processEffectiveBalanceUpdates(fork, allocator, epoch_cache, state, cache);
+    try observeEpochTransitionStep(.{ .step = .process_effective_balance_updates }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
 
-    processSlashingsReset(cached_state, cache);
-    processRandaoMixesReset(cached_state, cache);
+    try processSlashingsReset(fork, epoch_cache, state, cache);
+    try processRandaoMixesReset(fork, state, cache);
 
-    if (state.isPostCapella()) {
-        try processHistoricalSummariesUpdate(allocator, cached_state, cache);
+    if (comptime fork.gte(.capella)) {
+        try processHistoricalSummariesUpdate(fork, state, cache);
     } else {
-        try processHistoricalRootsUpdate(allocator, cached_state, cache);
+        try processHistoricalRootsUpdate(fork, state, cache);
     }
 
-    if (state.isPhase0()) {
-        processParticipationRecordUpdates(allocator, cached_state);
+    if (comptime fork == .phase0) {
+        try processParticipationRecordUpdates(fork, state);
     } else {
-        try processParticipationFlagUpdates(allocator, cached_state);
+        timer = time.start(io);
+        try processParticipationFlagUpdates(fork, state);
+        try observeEpochTransitionStep(.{ .step = .process_participation_flag_updates }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
 
-    if (state.isPostAltair()) {
-        try processSyncCommitteeUpdates(allocator, cached_state);
+    if (comptime fork.gte(.altair)) {
+        timer = time.start(io);
+        try processSyncCommitteeUpdates(fork, allocator, epoch_cache, state);
+        try observeEpochTransitionStep(.{ .step = .process_sync_committee_updates }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
 
-    if (state.isFulu()) {
-        const epoch_cache = cached_state.getEpochCache();
-        const effective_balance_increments = epoch_cache.getEffectiveBalanceIncrements();
-        try processProposerLookahead(allocator, state, &effective_balance_increments);
+    if (comptime fork.gte(.fulu)) {
+        timer = time.start(io);
+        try processProposerLookahead(fork, allocator, epoch_cache, state, cache);
+        try observeEpochTransitionStep(.{ .step = .process_proposer_lookahead }, @as(u64, @intCast(time.since(io, timer).nanoseconds)));
     }
+}
+
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+
+test "processEpoch - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
+
+    try processEpoch(
+        .electra,
+        allocator,
+        std.testing.io,
+        test_state.cached_state.config,
+        test_state.cached_state.epoch_cache,
+        test_state.cached_state.state.castToFork(.electra),
+        test_state.epoch_transition_cache,
+    );
 }

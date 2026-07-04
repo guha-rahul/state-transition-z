@@ -1,7 +1,5 @@
 const std = @import("std");
-const spec_test_options = @import("spec_test_options");
 const ForkSeq = @import("config").ForkSeq;
-const Preset = @import("preset").Preset;
 
 /// Transition has no sub-handlers so we define a single value enum.
 pub const Handler = enum {
@@ -37,7 +35,7 @@ const test_template =
     \\        @tagName(active_preset) ++ "/tests/" ++ @tagName(active_preset) ++ "/{s}/transition/{s}/{s}",
     \\    }});
     \\    defer allocator.free(test_dir_name);
-    \\    const test_dir = std.fs.cwd().openDir(test_dir_name, .{{}}) catch return error.SkipZigTest;
+    \\    const test_dir = std.Io.Dir.openDir(.cwd(), std.testing.io, test_dir_name, .{{}}) catch return error.SkipZigTest;
     \\
     \\    {s}
     \\}}
@@ -45,12 +43,12 @@ const test_template =
     \\
 ;
 
-pub fn writeHeader(writer: std.io.AnyWriter) !void {
+pub fn writeHeader(writer: *std.Io.Writer) !void {
     try writer.print(header, .{});
 }
 
 pub fn writeTest(
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     fork: ForkSeq,
     handler: Handler,
     test_case_name: []const u8,

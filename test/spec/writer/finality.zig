@@ -18,38 +18,42 @@ pub const header =
     \\// Do not commit changes by hand.
     \\
     \\const std = @import("std");
+    \\const Node = @import("persistent_merkle_tree").Node;
     \\const ForkSeq = @import("config").ForkSeq;
     \\const active_preset = @import("preset").active_preset;
     \\const spec_test_options = @import("spec_test_options");
     \\const Sanity = @import("../runner/sanity.zig");
     \\
     \\const allocator = std.testing.allocator;
+    \\const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
     \\
     \\
 ;
 
 const test_template =
     \\test "{s} finality {s} {s}" {{
+    \\    var pool = try Node.Pool.init(.{{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size }});
+    \\    defer pool.deinit();
     \\    const test_dir_name = try std.fs.path.join(allocator, &[_][]const u8{{
     \\        spec_test_options.spec_test_out_dir,
     \\        spec_test_options.spec_test_version,
     \\        @tagName(active_preset) ++ "/tests/" ++ @tagName(active_preset) ++ "/{s}/finality/{s}/pyspec_tests/{s}",
     \\    }});
     \\    defer allocator.free(test_dir_name);
-    \\    const test_dir = std.fs.cwd().openDir(test_dir_name, .{{}}) catch return error.SkipZigTest;
+    \\    const test_dir = std.Io.Dir.openDir(.cwd(), std.testing.io, test_dir_name, .{{}}) catch return error.SkipZigTest;
     \\
-    \\    try Sanity.BlocksTestCase(.{s}).execute(allocator, test_dir);
+    \\    try Sanity.BlocksTestCase(.{s}).execute(allocator, &pool, test_dir);
     \\}}
     \\
     \\
 ;
 
-pub fn writeHeader(writer: std.io.AnyWriter) !void {
+pub fn writeHeader(writer: *std.Io.Writer) !void {
     try writer.print(header, .{});
 }
 
 pub fn writeTest(
-    writer: std.io.AnyWriter,
+    writer: *std.Io.Writer,
     fork: ForkSeq,
     handler: Handler,
     test_case_name: []const u8,

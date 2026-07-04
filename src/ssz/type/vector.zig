@@ -1,17 +1,21 @@
 const std = @import("std");
-const expectEqualRoots = @import("test_utils.zig").expectEqualRoots;
-const expectEqualRootsAlloc = @import("test_utils.zig").expectEqualRootsAlloc;
-const expectEqualSerializedAlloc = @import("test_utils.zig").expectEqualSerializedAlloc;
-const expectEqualSerialized = @import("test_utils.zig").expectEqualSerialized;
 const TypeKind = @import("type_kind.zig").TypeKind;
 const isBasicType = @import("type_kind.zig").isBasicType;
 const isFixedType = @import("type_kind.zig").isFixedType;
+const canMemcpySsz = @import("type_kind.zig").canMemcpySsz;
 const OffsetIterator = @import("offsets.zig").OffsetIterator;
 const merkleize = @import("hashing").merkleize;
 const maxChunksToDepth = @import("hashing").maxChunksToDepth;
-const Node = @import("persistent_merkle_tree").Node;
+const getZeroHash = @import("hashing").getZeroHash;
+const pmt = @import("persistent_merkle_tree");
+const Node = pmt.Node;
+const tree_view = @import("../tree_view/root.zig");
+const ArrayBasicTreeView = tree_view.ArrayBasicTreeView;
+const ArrayCompositeTreeView = tree_view.ArrayCompositeTreeView;
 
-pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
+pub const TypeOpts = @import("list.zig").TypeOpts;
+
+pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int, comptime _opts: TypeOpts) type {
     comptime {
         if (!isFixedType(ST)) {
             @compileError("ST must be fixed type");
@@ -19,17 +23,41 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
         if (_length <= 0) {
             @compileError("length must be greater than 0");
         }
+        if (_opts.chunked_leaf and !isBasicType(ST)) {
+            @compileError("FixedVectorType: opts.chunked_leaf=true requires isBasicType(Element)");
+        }
+        if (_opts.chunked_leaf) {
+            const ChunkedLeaf = pmt.ChunkedLeaf;
+            const items_per_chunk_local = if (isBasicType(ST)) (32 / ST.fixed_size) else 1;
+            const min_length = ChunkedLeaf.K * items_per_chunk_local;
+            if (_length < min_length) {
+                @compileError(std.fmt.comptimePrint(
+                    "FixedVectorType: opts.chunked_leaf=true requires length >= K * items_per_chunk = {d} (chunk_depth must be >= ChunkedLeaf.k_log2)",
+                    .{min_length},
+                ));
+            }
+        }
     }
     return struct {
         pub const kind = TypeKind.vector;
         pub const Element: type = ST;
         pub const length: usize = _length;
+        pub const opts: TypeOpts = _opts;
         pub const Type: type = [length]Element.Type;
+        pub const TreeView: type = if (isBasicType(Element))
+            ArrayBasicTreeView(@This())
+        else
+            ArrayCompositeTreeView(@This());
         pub const fixed_size: usize = Element.fixed_size * length;
         pub const chunk_count: usize = if (isBasicType(Element)) std.math.divCeil(usize, fixed_size, 32) catch unreachable else length;
         pub const chunk_depth: u8 = maxChunksToDepth(chunk_count);
+        pub const use_chunked_leaf: bool = _opts.chunked_leaf;
+        const ChunkedLeaf = if (use_chunked_leaf) pmt.ChunkedLeaf else struct {};
+        const chunked_leaf_depth: u8 = if (use_chunked_leaf) chunk_depth - ChunkedLeaf.k_log2 else 0;
 
         pub const default_value: Type = [_]Element.Type{Element.default_value} ** length;
+
+        pub const default_root: [32]u8 = getZeroHash(chunk_depth).*;
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             for (a, b) |a_elem, b_elem| {
@@ -52,11 +80,29 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
             try merkleize(@ptrCast(&chunks), chunk_depth, out);
         }
 
-        pub fn clone(value: *const Type, out: *Type) !void {
-            out.* = value.*;
+        pub fn clone(value: *const Type, out: anytype) !void {
+            comptime {
+                const OutInfo = @typeInfo(@TypeOf(out.*));
+                std.debug.assert(OutInfo == .array);
+                std.debug.assert(OutInfo.array.len == length);
+            }
+
+            const OutType = @TypeOf(out.*);
+            if (OutType == Type) {
+                out.* = value.*;
+            } else {
+                inline for (value, 0..) |*element, i| {
+                    try Element.clone(element, &out[i]);
+                }
+            }
         }
 
         pub fn serializeIntoBytes(value: *const Type, out: []u8) usize {
+            if (comptime canMemcpySsz(Element)) {
+                const bytes = std.mem.sliceAsBytes(value);
+                @memcpy(out[0..fixed_size], bytes);
+                return fixed_size;
+            }
             var i: usize = 0;
             for (value) |element| {
                 i += Element.serializeIntoBytes(&element, out[i..]);
@@ -66,9 +112,13 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
 
         pub fn deserializeFromBytes(data: []const u8, out: *Type) !void {
             if (data.len != fixed_size) {
-                return error.invalidSize;
+                return error.InvalidSize;
             }
 
+            if (comptime canMemcpySsz(Element)) {
+                @memcpy(std.mem.sliceAsBytes(out), data[0..fixed_size]);
+                return;
+            }
             for (0..length) |i| {
                 try Element.deserializeFromBytes(
                     data[i * Element.fixed_size .. (i + 1) * Element.fixed_size],
@@ -80,7 +130,7 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
         pub const serialized = struct {
             pub fn validate(data: []const u8) !void {
                 if (data.len != fixed_size) {
-                    return error.invalidSize;
+                    return error.InvalidSize;
                 }
                 for (0..length) |i| {
                     try Element.serialized.validate(data[i * Element.fixed_size .. (i + 1) * Element.fixed_size]);
@@ -104,7 +154,106 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                if (comptime isBasicType(Element)) {
+                    return @enumFromInt(chunk_depth);
+                } else {
+                    var nodes: [chunk_count]Node.Id = undefined;
+
+                    const element_default = try Element.tree.default(pool);
+                    defer pool.free(&element_default);
+
+                    for (0..chunk_count) |i| {
+                        nodes[i] = element_default;
+                    }
+
+                    return try Node.fillWithContents(pool, &nodes, chunk_depth);
+                }
+            }
+
+            pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
+                if (data.len != fixed_size) {
+                    return error.InvalidSize;
+                }
+
+                if (comptime use_chunked_leaf) {
+                    var it = Node.FillWithContentsIterator.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
+                    errdefer it.deinit();
+
+                    const bytes_per_chunked_leaf: usize = ChunkedLeaf.K * 32;
+                    var byte_idx: usize = 0;
+
+                    while (byte_idx < data.len) {
+                        const remaining = data.len - byte_idx;
+                        const chunked_leaf_bytes = @min(remaining, bytes_per_chunked_leaf);
+                        const valid_chunks: u16 = @intCast((chunked_leaf_bytes + 31) / 32);
+                        var chunked_leaf_id_opt: ?Node.Id = try pool.createChunkedLeafEmpty(valid_chunks);
+                        errdefer if (chunked_leaf_id_opt) |id| pool.unref(id);
+                        const storage = try chunked_leaf_id_opt.?.getChunkedLeafPtr(pool);
+                        @memcpy(@as([*]u8, @ptrCast(&storage.chunks))[0..chunked_leaf_bytes], data[byte_idx..][0..chunked_leaf_bytes]);
+                        try it.append(chunked_leaf_id_opt.?);
+                        chunked_leaf_id_opt = null;
+                        byte_idx += chunked_leaf_bytes;
+                    }
+
+                    return try it.finish();
+                }
+
+                // Zero-filled so a mid-build error's errdefer is a no-op over the unfilled slots.
+                var nodes: [chunk_count]Node.Id = @splat(@as(Node.Id, @enumFromInt(0)));
+                errdefer pool.free(&nodes);
+
+                if (comptime isBasicType(Element)) {
+                    var chunks: [chunk_count][32]u8 = [_][32]u8{[_]u8{0} ** 32} ** chunk_count;
+                    const chunk_bytes: []u8 = @ptrCast(&chunks);
+                    @memcpy(chunk_bytes[0..fixed_size], data[0..fixed_size]);
+
+                    for (&chunks, 0..) |*chunk, i| {
+                        nodes[i] = try pool.createLeaf(chunk);
+                    }
+                } else {
+                    for (0..length) |i| {
+                        const elem_bytes = data[i * Element.fixed_size .. (i + 1) * Element.fixed_size];
+                        nodes[i] = try Element.tree.deserializeFromBytes(pool, elem_bytes);
+                    }
+                }
+
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
             pub fn toValue(node: Node.Id, pool: *Node.Pool, out: *Type) !void {
+                if (comptime use_chunked_leaf) {
+                    const items_per_chunk = 32 / Element.fixed_size;
+                    const chunked_leaf_count = (chunk_count + ChunkedLeaf.K - 1) / ChunkedLeaf.K;
+                    var chunked_leaf_ids: [chunked_leaf_count]Node.Id = undefined;
+                    try node.getNodesAtDepth(pool, chunked_leaf_depth, 0, &chunked_leaf_ids);
+
+                    const state_col = pool.nodes.items(.state);
+                    var item_idx: usize = 0;
+                    outer: for (chunked_leaf_ids) |sid| {
+                        // Zero subtree at chunked_leaf boundary == all-zero values.
+                        if (state_col[@intFromEnum(sid)].kind() == .zero) {
+                            const items_in_chunked_leaf = @min(ChunkedLeaf.K * items_per_chunk, length - item_idx);
+                            for (0..items_in_chunked_leaf) |i| {
+                                out[item_idx + i] = std.mem.zeroes(Element.Type);
+                            }
+                            item_idx += items_in_chunked_leaf;
+                            if (item_idx >= length) break :outer;
+                            continue;
+                        }
+                        const chunks = try sid.getChunkedLeafChunks(pool);
+                        for (0..ChunkedLeaf.K) |intra_chunk| {
+                            if (item_idx >= length) break :outer;
+                            const items_in_chunk = @min(items_per_chunk, length - item_idx);
+                            for (0..items_in_chunk) |i| {
+                                Element.tree.toValuePackedFromBytes(&chunks[intra_chunk], item_idx + i, &out[item_idx + i]);
+                            }
+                            item_idx += items_in_chunk;
+                        }
+                    }
+                    return;
+                }
+
                 var nodes: [chunk_count]Node.Id = undefined;
 
                 try node.getNodesAtDepth(pool, chunk_depth, 0, &nodes);
@@ -131,7 +280,42 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
             }
 
             pub fn fromValue(pool: *Node.Pool, value: *const Type) !Node.Id {
-                var nodes: [chunk_count]Node.Id = undefined;
+                if (comptime use_chunked_leaf) {
+                    var it = Node.FillWithContentsIterator.initWithOffset(pool, chunked_leaf_depth, ChunkedLeaf.k_log2);
+                    errdefer it.deinit();
+
+                    const items_per_chunk = 32 / Element.fixed_size;
+                    const items_per_chunked_leaf: usize = items_per_chunk * ChunkedLeaf.K;
+                    var item_idx: usize = 0;
+
+                    while (item_idx < length) {
+                        const remaining = length - item_idx;
+                        const items_in_chunked_leaf = @min(remaining, items_per_chunked_leaf);
+                        const valid_chunks: u16 = @intCast((items_in_chunked_leaf + items_per_chunk - 1) / items_per_chunk);
+
+                        var chunked_leaf_id_opt: ?Node.Id = try pool.createChunkedLeafEmpty(valid_chunks);
+                        errdefer if (chunked_leaf_id_opt) |id| pool.unref(id);
+                        const storage = try chunked_leaf_id_opt.?.getChunkedLeafPtr(pool);
+
+                        for (0..items_in_chunked_leaf) |k| {
+                            const chunked_leaf_chunk_idx = k / items_per_chunk;
+                            const intra_chunk = k % items_per_chunk;
+                            const dst_off = intra_chunk * Element.fixed_size;
+                            const dst_slice = storage.chunks[chunked_leaf_chunk_idx][dst_off .. dst_off + Element.fixed_size];
+                            _ = Element.serializeIntoBytes(&value[item_idx + k], dst_slice);
+                        }
+
+                        try it.append(chunked_leaf_id_opt.?);
+                        chunked_leaf_id_opt = null;
+                        item_idx += items_in_chunked_leaf;
+                    }
+
+                    return try it.finish();
+                }
+
+                // Zero-filled so a mid-build error's errdefer is a no-op over the unfilled slots.
+                var nodes: [chunk_count]Node.Id = @splat(@as(Node.Id, @enumFromInt(0)));
+                errdefer pool.free(&nodes);
 
                 if (comptime isBasicType(Element)) {
                     const items_per_chunk = 32 / Element.fixed_size;
@@ -151,6 +335,57 @@ pub fn FixedVectorType(comptime ST: type, comptime _length: comptime_int) type {
                     }
                 }
                 return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
+            pub fn serializeIntoBytes(node: Node.Id, pool: *Node.Pool, out: []u8) !usize {
+                if (comptime use_chunked_leaf) {
+                    const chunked_leaf_count = (chunk_count + ChunkedLeaf.K - 1) / ChunkedLeaf.K;
+                    var chunked_leaf_ids: [chunked_leaf_count]Node.Id = undefined;
+                    try node.getNodesAtDepth(pool, chunked_leaf_depth, 0, &chunked_leaf_ids);
+
+                    const state_col = pool.nodes.items(.state);
+                    var byte_idx: usize = 0;
+                    outer: for (chunked_leaf_ids) |sid| {
+                        // Zero subtree at chunked_leaf boundary == all-zero output bytes.
+                        if (state_col[@intFromEnum(sid)].kind() == .zero) {
+                            const remaining = fixed_size - byte_idx;
+                            const zero_bytes = @min(ChunkedLeaf.K * 32, remaining);
+                            @memset(out[byte_idx..][0..zero_bytes], 0);
+                            byte_idx += zero_bytes;
+                            if (byte_idx >= fixed_size) break :outer;
+                            continue;
+                        }
+                        const chunks = try sid.getChunkedLeafChunks(pool);
+                        for (0..ChunkedLeaf.K) |intra_chunk| {
+                            if (byte_idx >= fixed_size) break :outer;
+                            const remaining = fixed_size - byte_idx;
+                            const bytes_to_copy = @min(remaining, 32);
+                            @memcpy(out[byte_idx..][0..bytes_to_copy], chunks[intra_chunk][0..bytes_to_copy]);
+                            byte_idx += bytes_to_copy;
+                        }
+                    }
+                    return fixed_size;
+                }
+
+                var nodes: [chunk_count]Node.Id = undefined;
+                try node.getNodesAtDepth(pool, chunk_depth, 0, &nodes);
+
+                if (comptime isBasicType(Element)) {
+                    for (0..chunk_count) |i| {
+                        const start_idx = i * 32;
+                        const remaining_bytes = fixed_size - start_idx;
+                        const bytes_to_copy = @min(remaining_bytes, 32);
+                        if (bytes_to_copy > 0) {
+                            @memcpy(out[start_idx..][0..bytes_to_copy], nodes[i].getRoot(pool)[0..bytes_to_copy]);
+                        }
+                    }
+                } else {
+                    var offset: usize = 0;
+                    for (0..length) |i| {
+                        offset += try Element.tree.serializeIntoBytes(nodes[i], pool, out[offset..]);
+                    }
+                }
+                return fixed_size;
             }
         };
 
@@ -196,12 +431,24 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
         pub const Element: type = ST;
         pub const length: usize = _length;
         pub const Type: type = [length]Element.Type;
+        pub const TreeView: type = if (isBasicType(Element))
+            ArrayBasicTreeView(@This())
+        else
+            ArrayCompositeTreeView(@This());
         pub const min_size: usize = Element.min_size * length + 4 * length;
         pub const max_size: usize = Element.max_size * length + 4 * length;
         pub const chunk_count: usize = length;
         pub const chunk_depth: u8 = maxChunksToDepth(chunk_count);
 
         pub const default_value: Type = [_]Element.Type{Element.default_value} ** length;
+
+        pub const default_root: [32]u8 = blk: {
+            var buf: [32]u8 = undefined;
+            var chunks = [_][32]u8{[_]u8{0} ** 32} ** ((chunk_count + 1) / 2 * 2);
+            @memset(chunks[0..length], Element.default_root);
+            merkleize(@ptrCast(&chunks), chunk_depth, &buf) catch unreachable;
+            break :blk buf;
+        };
 
         pub fn equals(a: *const Type, b: *const Type) bool {
             for (a, b) |a_elem, b_elem| {
@@ -226,8 +473,16 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
             try merkleize(@ptrCast(&chunks), chunk_depth, out);
         }
 
-        pub fn clone(allocator: std.mem.Allocator, value: *const Type, out: *Type) !void {
-            for (0..length) |i| try Element.clone(allocator, &value[i], &out[i]);
+        pub fn clone(allocator: std.mem.Allocator, value: *const Type, out: anytype) !void {
+            comptime {
+                const OutInfo = @typeInfo(@TypeOf(out.*));
+                std.debug.assert(OutInfo == .array);
+                std.debug.assert(OutInfo.array.len == length);
+            }
+
+            for (value, 0..) |*element, i| {
+                try Element.clone(allocator, element, &out[i]);
+            }
         }
 
         pub fn serializedSize(value: *const Type) usize {
@@ -294,6 +549,37 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
         };
 
         pub const tree = struct {
+            pub fn default(pool: *Node.Pool) !Node.Id {
+                var nodes: [chunk_count]Node.Id = undefined;
+
+                const element_default = try Element.tree.default(pool);
+                defer pool.unref(element_default);
+
+                for (0..chunk_count) |i| {
+                    nodes[i] = element_default;
+                }
+
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
+            pub fn deserializeFromBytes(pool: *Node.Pool, data: []const u8) !Node.Id {
+                if (data.len > max_size or data.len < min_size) {
+                    return error.InvalidSize;
+                }
+
+                const offsets = try readVariableOffsets(data);
+                // Zero-filled so a mid-build error's errdefer is a no-op over the unfilled slots.
+                var nodes: [chunk_count]Node.Id = @splat(@as(Node.Id, @enumFromInt(0)));
+                errdefer pool.free(&nodes);
+
+                for (0..length) |i| {
+                    const elem_bytes = data[offsets[i]..offsets[i + 1]];
+                    nodes[i] = try Element.tree.deserializeFromBytes(pool, elem_bytes);
+                }
+
+                return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
             pub fn toValue(allocator: std.mem.Allocator, node: Node.Id, pool: *Node.Pool, out: *Type) !void {
                 var nodes: [chunk_count]Node.Id = undefined;
 
@@ -309,13 +595,41 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
                 }
             }
 
-            pub fn fromValue(allocator: std.mem.Allocator, pool: *Node.Pool, value: *const Type) !Node.Id {
-                var nodes: [chunk_count]Node.Id = undefined;
+            pub fn fromValue(pool: *Node.Pool, value: *const Type) !Node.Id {
+                // Zero-filled so a mid-build error's errdefer is a no-op over the unfilled slots.
+                var nodes: [chunk_count]Node.Id = @splat(@as(Node.Id, @enumFromInt(0)));
+                errdefer pool.free(&nodes);
 
                 for (0..chunk_count) |i| {
-                    nodes[i] = try Element.tree.fromValue(allocator, pool, &value[i]);
+                    nodes[i] = try Element.tree.fromValue(pool, &value[i]);
                 }
                 return try Node.fillWithContents(pool, &nodes, chunk_depth);
+            }
+
+            pub fn serializeIntoBytes(node: Node.Id, pool: *Node.Pool, out: []u8) !usize {
+                var nodes: [chunk_count]Node.Id = undefined;
+                try node.getNodesAtDepth(pool, chunk_depth, 0, &nodes);
+
+                const fixed_end = length * 4;
+                var variable_index = fixed_end;
+
+                for (0..length) |i| {
+                    std.mem.writeInt(u32, out[i * 4 ..][0..4], @intCast(variable_index), .little);
+                    variable_index += try Element.tree.serializeIntoBytes(nodes[i], pool, out[variable_index..]);
+                }
+
+                return variable_index;
+            }
+
+            pub fn serializedSize(node: Node.Id, pool: *Node.Pool) !usize {
+                var nodes: [chunk_count]Node.Id = undefined;
+                try node.getNodesAtDepth(pool, chunk_depth, 0, &nodes);
+
+                var total_size: usize = length * 4; // Offsets
+                for (0..length) |i| {
+                    total_size += try Element.tree.serializedSize(nodes[i], pool);
+                }
+                return total_size;
             }
         };
 
@@ -348,12 +662,14 @@ pub fn VariableVectorType(comptime ST: type, comptime _length: comptime_int) typ
 }
 
 const UintType = @import("uint.zig").UintType;
-const BoolType = @import("bool.zig").BoolType;
-const BitListType = @import("bit_list.zig").BitListType;
+const ByteVectorType = @import("byte_vector.zig").ByteVectorType;
+const FixedContainerType = @import("container.zig").FixedContainerType;
+const FixedListType = @import("list.zig").FixedListType;
+const VariableContainerType = @import("container.zig").VariableContainerType;
 
 test "vector - sanity" {
     // create a fixed vector type and instance and round-trip serialize
-    const Bytes32 = FixedVectorType(UintType(8), 32);
+    const Bytes32 = FixedVectorType(UintType(8), 32, .{});
 
     var b0: Bytes32.Type = undefined;
     var b0_buf: [Bytes32.fixed_size]u8 = undefined;
@@ -361,29 +677,547 @@ test "vector - sanity" {
     try Bytes32.deserializeFromBytes(&b0_buf, &b0);
 }
 
-test "clone" {
+test "clone FixedVectorType" {
+    const Checkpoint = FixedContainerType(struct {
+        epoch: UintType(8),
+        root: ByteVectorType(32),
+    });
+    const CheckpointVector = FixedVectorType(Checkpoint, 4, .{});
+    var vector: CheckpointVector.Type = CheckpointVector.default_value;
+    vector[0].epoch = 42;
+
+    var cloned: CheckpointVector.Type = undefined;
+    try CheckpointVector.clone(&vector, &cloned);
+    try std.testing.expect(&vector != &cloned);
+    try std.testing.expect(CheckpointVector.equals(&vector, &cloned));
+
+    // clone into another type
+    const CheckpointHex = FixedContainerType(struct {
+        epoch: UintType(8),
+        root: ByteVectorType(32),
+        root_hex: ByteVectorType(64),
+    });
+    const CheckpointHexVector = FixedVectorType(CheckpointHex, 4, .{});
+    var cloned2: CheckpointHexVector.Type = undefined;
+    try CheckpointVector.clone(&vector, &cloned2);
+    try std.testing.expect(cloned2[0].epoch == 42);
+}
+
+test "clone VariableVectorType" {
     const allocator = std.testing.allocator;
-    const BoolVectorFixed = FixedVectorType(BoolType(), 8);
-    var bvf: BoolVectorFixed.Type = BoolVectorFixed.default_value;
+    const FieldA = FixedListType(UintType(8), 32, .{});
+    const Foo = VariableContainerType(struct {
+        a: FieldA,
+    });
+    const FooVector = VariableVectorType(Foo, 4);
+    var foo_vector: FooVector.Type = FooVector.default_value;
+    defer FooVector.deinit(allocator, &foo_vector);
+    try foo_vector[0].a.append(allocator, 100);
 
-    var cloned: BoolVectorFixed.Type = undefined;
-    try BoolVectorFixed.clone(&bvf, &cloned);
-    try expectEqualRoots(BoolVectorFixed, bvf, cloned);
-    try expectEqualSerialized(BoolVectorFixed, bvf, cloned);
+    var cloned: FooVector.Type = undefined;
+    defer FooVector.deinit(allocator, &cloned);
+    try FooVector.clone(allocator, &foo_vector, &cloned);
+    try std.testing.expect(&foo_vector != &cloned);
+    try std.testing.expect(FooVector.equals(&foo_vector, &cloned));
+    try std.testing.expect(cloned[0].a.items.len == 1);
+    try std.testing.expect(cloned[0].a.items[0] == 100);
 
-    try std.testing.expect(&bvf != &cloned);
-    try std.testing.expect(std.mem.eql(bool, bvf[0..], cloned[0..]));
+    // clone into another type
+    const Bar = VariableContainerType(struct {
+        a: FieldA,
+        b: UintType(8),
+    });
+    const BarVector = VariableVectorType(Bar, 4);
+    var cloned2: BarVector.Type = undefined;
+    defer BarVector.deinit(allocator, &cloned2);
+    try FooVector.clone(allocator, &foo_vector, &cloned2);
+    try std.testing.expect(cloned2[0].a.items.len == 1);
+    try std.testing.expect(cloned2[0].a.items[0] == 100);
+}
 
-    const limit = 16;
-    const BitList = BitListType(limit);
-    const bl = BitList.default_value;
-    const BoolVectorVariable = VariableVectorType(BitList, 8);
-    var bvv: BoolVectorVariable.Type = BoolVectorVariable.default_value;
-    bvv[0] = bl;
+// Refer to https://github.com/ChainSafe/ssz/blob/f5ed0b457333749b5c3f49fa5eafa096a725f033/packages/ssz/test/unit/byType/vector/valid.test.ts#L15-L85
+test "FixedVectorType - serializeIntoBytes (VectorBasic uint64 - 4 values)" {
+    const allocator = std.testing.allocator;
+    const VectorU64 = FixedVectorType(UintType(64), 4, .{});
 
-    var cloned_v: BoolVectorVariable.Type = undefined;
-    try BoolVectorVariable.clone(allocator, &bvv, &cloned_v);
-    try std.testing.expect(&bvv != &cloned_v);
-    try expectEqualRootsAlloc(BoolVectorVariable, allocator, bvv, cloned_v);
-    try expectEqualSerializedAlloc(BoolVectorVariable, allocator, bvv, cloned_v);
+    const value: VectorU64.Type = [_]u64{ 100000, 200000, 300000, 400000 };
+
+    // 0xa086010000000000400d030000000000e093040000000000801a060000000000
+    const expected_serialized = [_]u8{
+        0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // 100000
+        0x40, 0x0d, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, // 200000
+        0xe0, 0x93, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // 300000
+        0x80, 0x1a, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, // 400000
+    };
+    const expected_root = expected_serialized;
+
+    var serialized: [VectorU64.fixed_size]u8 = undefined;
+    const written = VectorU64.serializeIntoBytes(&value, &serialized);
+    try std.testing.expectEqual(@as(usize, 32), written);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &serialized);
+
+    var root: [32]u8 = undefined;
+    try VectorU64.hashTreeRoot(&value, &root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+    const node = try VectorU64.tree.fromValue(&pool, &value);
+    var tree_serialized: [VectorU64.fixed_size]u8 = undefined;
+    _ = try VectorU64.tree.serializeIntoBytes(node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &tree_serialized);
+}
+
+test "FixedVectorType - serializeIntoBytes (VectorComposite ByteVector32 - 4 roots)" {
+    const allocator = std.testing.allocator;
+    const ByteVector32 = ByteVectorType(32);
+    const VectorBV32 = FixedVectorType(ByteVector32, 4, .{});
+
+    const value: VectorBV32.Type = [_][32]u8{
+        [_]u8{0xbb} ** 32,
+        [_]u8{0xcc} ** 32,
+        [_]u8{0xdd} ** 32,
+        [_]u8{0xee} ** 32,
+    };
+
+    const expected_serialized = [_]u8{0xbb} ** 32 ++ [_]u8{0xcc} ** 32 ++ [_]u8{0xdd} ** 32 ++ [_]u8{0xee} ** 32;
+    const expected_root = [_]u8{ 0x56, 0x01, 0x9b, 0xaf, 0xbc, 0x63, 0x46, 0x1b, 0x73, 0xe2, 0x1c, 0x6e, 0xae, 0x0c, 0x62, 0xe8, 0xd5, 0xb8, 0xe0, 0x5c, 0xb0, 0xac, 0x06, 0x57, 0x77, 0xdc, 0x23, 0x8f, 0xcf, 0x96, 0x04, 0xe6 };
+
+    var serialized: [VectorBV32.fixed_size]u8 = undefined;
+    const written = VectorBV32.serializeIntoBytes(&value, &serialized);
+    try std.testing.expectEqual(@as(usize, 128), written);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &serialized);
+
+    var root: [32]u8 = undefined;
+    try VectorBV32.hashTreeRoot(&value, &root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+    const node = try VectorBV32.tree.fromValue(&pool, &value);
+    var tree_serialized: [VectorBV32.fixed_size]u8 = undefined;
+    _ = try VectorBV32.tree.serializeIntoBytes(node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &tree_serialized);
+}
+
+test "FixedVectorType - serializeIntoBytes (VectorComposite Container - 4 arrays)" {
+    const allocator = std.testing.allocator;
+    const Container = FixedContainerType(struct {
+        a: UintType(64),
+        b: UintType(64),
+    });
+    const VectorContainer = FixedVectorType(Container, 4, .{});
+
+    const value: VectorContainer.Type = [_]Container.Type{
+        .{ .a = 0, .b = 0 },
+        .{ .a = 123456, .b = 654321 },
+        .{ .a = 234567, .b = 765432 },
+        .{ .a = 345678, .b = 876543 },
+    };
+
+    // 0x0000000000000000000000000000000040e2010000000000f1fb0900000000004794030000000000f8ad0b00000000004e46050000000000ff5f0d0000000000
+    const expected_serialized = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // a=0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // b=0
+        0x40, 0xe2, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // a=123456
+        0xf1, 0xfb, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, // b=654321
+        0x47, 0x94, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, // a=234567
+        0xf8, 0xad, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, // b=765432
+        0x4e, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, // a=345678
+        0xff, 0x5f, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, // b=876543
+    };
+    const expected_root = [_]u8{ 0xb1, 0xa7, 0x97, 0xeb, 0x50, 0x65, 0x47, 0x48, 0xba, 0x23, 0x90, 0x10, 0xed, 0xcc, 0xea, 0x7b, 0x46, 0xb5, 0x5b, 0xf7, 0x40, 0x73, 0x0b, 0x70, 0x06, 0x84, 0xf4, 0x8b, 0x0c, 0x47, 0x83, 0x72 };
+
+    var serialized: [VectorContainer.fixed_size]u8 = undefined;
+    const written = VectorContainer.serializeIntoBytes(&value, &serialized);
+    try std.testing.expectEqual(@as(usize, 64), written);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &serialized);
+
+    var root: [32]u8 = undefined;
+    try VectorContainer.hashTreeRoot(&value, &root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+    const node = try VectorContainer.tree.fromValue(&pool, &value);
+    var tree_serialized: [VectorContainer.fixed_size]u8 = undefined;
+    _ = try VectorContainer.tree.serializeIntoBytes(node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &tree_serialized);
+}
+
+test "VariableVectorType - serializeIntoBytes (VectorComposite ListBasic - [[1,2],[5,6]])" {
+    const allocator = std.testing.allocator;
+    const ListU64 = FixedListType(UintType(64), 8, .{});
+    const VectorList = VariableVectorType(ListU64, 2);
+
+    var value: VectorList.Type = VectorList.default_value;
+    // [[1,2],[5,6]]
+    try value[0].appendSlice(allocator, &[_]u64{ 1, 2 });
+    try value[1].appendSlice(allocator, &[_]u64{ 5, 6 });
+    defer VectorList.deinit(allocator, &value);
+
+    // 0x08000000180000000100000000000000020000000000000005000000000000000600000000000000
+    const expected_serialized = [_]u8{
+        0x08, 0x00, 0x00, 0x00, // offset to first list = 8
+        0x18, 0x00, 0x00, 0x00, // offset to second list = 24
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 1
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2
+        0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 5
+        0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 6
+    };
+    const expected_root = [_]u8{ 0x00, 0x14, 0xc4, 0x85, 0xce, 0x39, 0xc8, 0x07, 0x1f, 0x69, 0x63, 0x15, 0x66, 0xb1, 0xd1, 0xad, 0x51, 0xe2, 0xb0, 0xb5, 0xab, 0xc3, 0xc7, 0xa2, 0x99, 0xa6, 0xfa, 0xc1, 0xab, 0xce, 0x9e, 0x49 };
+
+    const size = VectorList.serializedSize(&value);
+    try std.testing.expectEqual(@as(usize, 40), size);
+    const serialized = try allocator.alloc(u8, size);
+    defer allocator.free(serialized);
+    const written = VectorList.serializeIntoBytes(&value, serialized);
+    try std.testing.expectEqual(@as(usize, 40), written);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, serialized);
+
+    var root: [32]u8 = undefined;
+    try VectorList.hashTreeRoot(allocator, &value, &root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+    const node = try VectorList.tree.fromValue(&pool, &value);
+    const tree_size = try VectorList.tree.serializedSize(node, &pool);
+    try std.testing.expectEqual(@as(usize, 40), tree_size);
+    const tree_serialized = try allocator.alloc(u8, tree_size);
+    defer allocator.free(tree_serialized);
+    _ = try VectorList.tree.serializeIntoBytes(node, &pool, tree_serialized);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, tree_serialized);
+}
+
+test "FixedVectorType - tree.deserializeFromBytes (VectorBasic uint64)" {
+    const allocator = std.testing.allocator;
+    const VectorU64 = FixedVectorType(UintType(64), 4, .{});
+
+    // 0xa086010000000000400d030000000000e093040000000000801a060000000000
+    const serialized = [_]u8{
+        0xa0, 0x86, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // 100000
+        0x40, 0x0d, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, // 200000
+        0xe0, 0x93, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, // 300000
+        0x80, 0x1a, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, // 400000
+    };
+    const expected_values = [_]u64{ 100000, 200000, 300000, 400000 };
+    const expected_root = serialized; // For VectorBasic with 4 uint64 values, root equals serialized
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const tree_node = try VectorU64.tree.deserializeFromBytes(&pool, &serialized);
+
+    var value_from_tree: VectorU64.Type = undefined;
+    try VectorU64.tree.toValue(tree_node, &pool, &value_from_tree);
+
+    try std.testing.expectEqualSlices(u64, &expected_values, &value_from_tree);
+
+    var tree_serialized: [VectorU64.fixed_size]u8 = undefined;
+    _ = try VectorU64.tree.serializeIntoBytes(tree_node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &serialized, &tree_serialized);
+
+    var hash_root: [32]u8 = undefined;
+    try VectorU64.hashTreeRoot(&value_from_tree, &hash_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &hash_root);
+}
+
+test "FixedVectorType - tree.deserializeFromBytes (VectorComposite ByteVector32)" {
+    const allocator = std.testing.allocator;
+    const ByteVector32 = ByteVectorType(32);
+    const VectorBV32 = FixedVectorType(ByteVector32, 4, .{});
+
+    // 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+    const serialized = [_]u8{0xbb} ** 32 ++ [_]u8{0xcc} ** 32 ++ [_]u8{0xdd} ** 32 ++ [_]u8{0xee} ** 32;
+    const expected_values = [_][32]u8{
+        [_]u8{0xbb} ** 32,
+        [_]u8{0xcc} ** 32,
+        [_]u8{0xdd} ** 32,
+        [_]u8{0xee} ** 32,
+    };
+    // 0x56019bafbc63461b73e21c6eae0c62e8d5b8e05cb0ac065777dc238fcf9604e6
+    const expected_root = [_]u8{ 0x56, 0x01, 0x9b, 0xaf, 0xbc, 0x63, 0x46, 0x1b, 0x73, 0xe2, 0x1c, 0x6e, 0xae, 0x0c, 0x62, 0xe8, 0xd5, 0xb8, 0xe0, 0x5c, 0xb0, 0xac, 0x06, 0x57, 0x77, 0xdc, 0x23, 0x8f, 0xcf, 0x96, 0x04, 0xe6 };
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const tree_node = try VectorBV32.tree.deserializeFromBytes(&pool, &serialized);
+
+    var value_from_tree: VectorBV32.Type = undefined;
+    try VectorBV32.tree.toValue(tree_node, &pool, &value_from_tree);
+
+    for (expected_values, 0..) |expected, i| {
+        try std.testing.expectEqualSlices(u8, &expected, &value_from_tree[i]);
+    }
+
+    var tree_serialized: [VectorBV32.fixed_size]u8 = undefined;
+    _ = try VectorBV32.tree.serializeIntoBytes(tree_node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &serialized, &tree_serialized);
+
+    var hash_root: [32]u8 = undefined;
+    try VectorBV32.hashTreeRoot(&value_from_tree, &hash_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &hash_root);
+}
+
+test "FixedVectorType - tree.deserializeFromBytes (VectorComposite Container)" {
+    const allocator = std.testing.allocator;
+    const Container = FixedContainerType(struct {
+        a: UintType(64),
+        b: UintType(64),
+    });
+    const VectorContainer = FixedVectorType(Container, 4, .{});
+
+    // 0x0000000000000000000000000000000040e2010000000000f1fb0900000000004794030000000000f8ad0b00000000004e46050000000000ff5f0d0000000000
+    const serialized = [_]u8{
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // a=0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // b=0
+        0x40, 0xe2, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, // a=123456
+        0xf1, 0xfb, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, // b=654321
+        0x47, 0x94, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, // a=234567
+        0xf8, 0xad, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, // b=765432
+        0x4e, 0x46, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, // a=345678
+        0xff, 0x5f, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, // b=876543
+    };
+    const expected_values = [_]Container.Type{
+        .{ .a = 0, .b = 0 },
+        .{ .a = 123456, .b = 654321 },
+        .{ .a = 234567, .b = 765432 },
+        .{ .a = 345678, .b = 876543 },
+    };
+    // 0xb1a797eb50654748ba239010edccea7b46b55bf740730b700684f48b0c478372
+    const expected_root = [_]u8{ 0xb1, 0xa7, 0x97, 0xeb, 0x50, 0x65, 0x47, 0x48, 0xba, 0x23, 0x90, 0x10, 0xed, 0xcc, 0xea, 0x7b, 0x46, 0xb5, 0x5b, 0xf7, 0x40, 0x73, 0x0b, 0x70, 0x06, 0x84, 0xf4, 0x8b, 0x0c, 0x47, 0x83, 0x72 };
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const tree_node = try VectorContainer.tree.deserializeFromBytes(&pool, &serialized);
+
+    var value_from_tree: VectorContainer.Type = undefined;
+    try VectorContainer.tree.toValue(tree_node, &pool, &value_from_tree);
+
+    for (expected_values, 0..) |expected, i| {
+        try std.testing.expectEqual(expected.a, value_from_tree[i].a);
+        try std.testing.expectEqual(expected.b, value_from_tree[i].b);
+    }
+
+    var tree_serialized: [VectorContainer.fixed_size]u8 = undefined;
+    _ = try VectorContainer.tree.serializeIntoBytes(tree_node, &pool, &tree_serialized);
+    try std.testing.expectEqualSlices(u8, &serialized, &tree_serialized);
+
+    var hash_root: [32]u8 = undefined;
+    try VectorContainer.hashTreeRoot(&value_from_tree, &hash_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &hash_root);
+}
+
+test "VariableVectorType - tree.deserializeFromBytes (VectorComposite ListBasic)" {
+    const allocator = std.testing.allocator;
+    const ListU64 = FixedListType(UintType(64), 8, .{});
+    const VectorList = VariableVectorType(ListU64, 2);
+
+    // 0x08000000180000000100000000000000020000000000000005000000000000000600000000000000
+    const serialized = [_]u8{
+        0x08, 0x00, 0x00, 0x00, // offset to first list = 8
+        0x18, 0x00, 0x00, 0x00, // offset to second list = 24
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 1
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 2
+        0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 5
+        0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 6
+    };
+    // 0x0014c485ce39c8071f69631566b1d1ad51e2b0b5abc3c7a299a6fac1abce9e49
+    const expected_root = [_]u8{ 0x00, 0x14, 0xc4, 0x85, 0xce, 0x39, 0xc8, 0x07, 0x1f, 0x69, 0x63, 0x15, 0x66, 0xb1, 0xd1, 0xad, 0x51, 0xe2, 0xb0, 0xb5, 0xab, 0xc3, 0xc7, 0xa2, 0x99, 0xa6, 0xfa, 0xc1, 0xab, 0xce, 0x9e, 0x49 };
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const tree_node = try VectorList.tree.deserializeFromBytes(&pool, &serialized);
+
+    var value_from_tree: VectorList.Type = VectorList.default_value;
+    defer VectorList.deinit(allocator, &value_from_tree);
+    try VectorList.tree.toValue(allocator, tree_node, &pool, &value_from_tree);
+
+    try std.testing.expectEqual(@as(usize, 2), value_from_tree[0].items.len);
+    try std.testing.expectEqual(@as(u64, 1), value_from_tree[0].items[0]);
+    try std.testing.expectEqual(@as(u64, 2), value_from_tree[0].items[1]);
+    try std.testing.expectEqual(@as(usize, 2), value_from_tree[1].items.len);
+    try std.testing.expectEqual(@as(u64, 5), value_from_tree[1].items[0]);
+    try std.testing.expectEqual(@as(u64, 6), value_from_tree[1].items[1]);
+
+    const tree_size = try VectorList.tree.serializedSize(tree_node, &pool);
+    try std.testing.expectEqual(@as(usize, 40), tree_size);
+    const tree_serialized = try allocator.alloc(u8, tree_size);
+    defer allocator.free(tree_serialized);
+    _ = try VectorList.tree.serializeIntoBytes(tree_node, &pool, tree_serialized);
+    try std.testing.expectEqualSlices(u8, &serialized, tree_serialized);
+
+    var hash_root: [32]u8 = undefined;
+    try VectorList.hashTreeRoot(allocator, &value_from_tree, &hash_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &hash_root);
+}
+
+const TypeTestCase = @import("test_utils.zig").TypeTestCase;
+const testCases = [_]TypeTestCase{
+    // refer to https://github.com/ChainSafe/ssz/blob/7f5580c2ea69f9307300ddb6010a8bc7ce2fc471/packages/ssz/test/unit/byType/vector/valid.test.ts#L20
+    .{
+        .id = "4 values",
+        .serializedHex = "0xa086010000000000400d030000000000e093040000000000801a060000000000",
+        .json =
+        \\["100000","200000","300000","400000"]
+        ,
+        .rootHex = "0xa086010000000000400d030000000000e093040000000000801a060000000000",
+    },
+};
+
+test "valid test for VectorBasicType" {
+    const allocator = std.testing.allocator;
+
+    // uint of 8 bytes = u64
+    const Uint = UintType(64);
+    const Vector = FixedVectorType(Uint, 4, .{});
+
+    const TypeTest = @import("test_utils.zig").typeTest(Vector);
+
+    for (testCases[0..]) |*tc| {
+        try TypeTest.run(allocator, tc);
+    }
+}
+
+test "FixedVectorType equals" {
+    const Vec = FixedVectorType(UintType(8), 4, .{});
+
+    var a: Vec.Type = [_]u8{ 1, 2, 3, 4 };
+    var b: Vec.Type = [_]u8{ 1, 2, 3, 4 };
+    var c: Vec.Type = [_]u8{ 1, 2, 3, 5 };
+
+    try std.testing.expect(Vec.equals(&a, &b));
+    try std.testing.expect(!Vec.equals(&a, &c));
+}
+test "VectorCompositeType of Root" {
+    const test_cases = [_]TypeTestCase{
+        .{
+            .id = "4 roots",
+            .serializedHex = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            .json =
+            \\["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]
+            ,
+            .rootHex = "0x56019bafbc63461b73e21c6eae0c62e8d5b8e05cb0ac065777dc238fcf9604e6",
+        },
+    };
+
+    const allocator = std.testing.allocator;
+    const ByteVector = ByteVectorType(32);
+    const Vector = FixedVectorType(ByteVector, 4, .{});
+
+    const TypeTest = @import("test_utils.zig").typeTest(Vector);
+
+    for (test_cases[0..]) |*tc| {
+        try TypeTest.run(allocator, tc);
+    }
+}
+
+test "VectorCompositeType of Container" {
+    const test_cases = [_]TypeTestCase{
+        .{
+            .id = "4 containers",
+            .serializedHex = "0x01000000000000000200000000000000030000000000000004000000000000000500000000000000060000000000000007000000000000000800000000000000",
+            .json =
+            \\[{"a":"1","b":"2"},{"a":"3","b":"4"},{"a":"5","b":"6"},{"a":"7","b":"8"}]
+            ,
+            .rootHex = "0x99cb728885028dc2c35af59794139055007536d3ed8efb214db6b8798fcc8480",
+        },
+    };
+
+    const allocator = std.testing.allocator;
+    const Uint = UintType(64);
+    const Container = FixedContainerType(struct {
+        a: Uint,
+        b: Uint,
+    });
+    const Vector = FixedVectorType(Container, 4, .{});
+
+    const TypeTest = @import("test_utils.zig").typeTest(Vector);
+
+    for (test_cases[0..]) |*tc| {
+        try TypeTest.run(allocator, tc);
+    }
+}
+
+test "FixedVectorType - default_root" {
+    const VectorU64 = FixedVectorType(UintType(64), 4, .{});
+    var expected_root: [32]u8 = undefined;
+
+    try VectorU64.hashTreeRoot(&VectorU64.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &VectorU64.default_root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const node = try VectorU64.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
+}
+
+test "VariableVectorType - default_root" {
+    const ListU64 = FixedListType(UintType(64), 8, .{});
+    const VectorList = VariableVectorType(ListU64, 2);
+    var expected_root: [32]u8 = undefined;
+
+    try VectorList.hashTreeRoot(std.testing.allocator, &VectorList.default_value, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &VectorList.default_root);
+
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const node = try VectorList.tree.default(&pool);
+    try std.testing.expectEqualSlices(u8, &expected_root, node.getRoot(&pool));
+}
+
+test "FixedVectorType opts.chunked_leaf=true: round-trip fromValue -> tree -> toValue" {
+    const allocator = std.testing.allocator;
+    const ChunkedLeaf = pmt.ChunkedLeaf;
+    const length: usize = 2 * @as(usize, ChunkedLeaf.K) * 4 + 7;
+    const VecT = FixedVectorType(UintType(64), length, .{ .chunked_leaf = true });
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 4096 });
+    defer pool.deinit();
+
+    var src: VecT.Type = undefined;
+    for (0..length) |i| src[i] = @as(u64, @intCast(i * 31 + 1));
+
+    const tree_id = try VecT.tree.fromValue(&pool, &src);
+    defer pool.unref(tree_id);
+
+    var dst: VecT.Type = undefined;
+    try VecT.tree.toValue(tree_id, &pool, &dst);
+    for (src, dst) |a, b| try std.testing.expectEqual(a, b);
+
+    // Hash matches the leaf-path (non-chunked_leaf) reference root.
+    const VecLeafT = FixedVectorType(UintType(64), length, .{});
+    const leaf_tree_id = try VecLeafT.tree.fromValue(&pool, &src);
+    defer pool.unref(leaf_tree_id);
+    try std.testing.expectEqualSlices(u8, leaf_tree_id.getRoot(&pool), tree_id.getRoot(&pool));
+}
+
+test "FixedVectorType opts.chunked_leaf=true: serialize -> deserialize round-trip" {
+    const allocator = std.testing.allocator;
+    const ChunkedLeaf = pmt.ChunkedLeaf;
+    const length: usize = 2 * @as(usize, ChunkedLeaf.K) * 4;
+    const VecT = FixedVectorType(UintType(64), length, .{ .chunked_leaf = true });
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 4096 });
+    defer pool.deinit();
+
+    var src: VecT.Type = undefined;
+    for (0..length) |i| src[i] = @as(u64, @intCast(i));
+
+    const tree_id = try VecT.tree.fromValue(&pool, &src);
+    defer pool.unref(tree_id);
+
+    const buf = try allocator.alloc(u8, length * @sizeOf(u64));
+    defer allocator.free(buf);
+    const written = try VecT.tree.serializeIntoBytes(tree_id, &pool, buf);
+    try std.testing.expectEqual(length * @sizeOf(u64), written);
+
+    const round_id = try VecT.tree.deserializeFromBytes(&pool, buf);
+    defer pool.unref(round_id);
+    try std.testing.expectEqualSlices(u8, tree_id.getRoot(&pool), round_id.getRoot(&pool));
 }

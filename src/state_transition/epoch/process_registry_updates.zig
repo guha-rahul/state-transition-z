@@ -1,49 +1,75 @@
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
-const types = @import("consensus_types");
-const Epoch = types.primitive.Epoch.Type;
-const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
 const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
+const BeaconState = @import("fork_types").BeaconState;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
+const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
 const computeActivationExitEpoch = @import("../utils/epoch.zig").computeActivationExitEpoch;
 const initiateValidatorExit = @import("../block/initiate_validator_exit.zig").initiateValidatorExit;
+const Node = @import("persistent_merkle_tree").Node;
 
-pub fn processRegistryUpdates(cached_state: *CachedBeaconStateAllForks, cache: *const EpochTransitionCache) !void {
-    const epoch_cache = cached_state.getEpochCache();
-    const state = cached_state.state;
-
+pub fn processRegistryUpdates(
+    comptime fork: ForkSeq,
+    config: *const BeaconConfig,
+    epoch_cache: *EpochCache,
+    state: *BeaconState(fork),
+    cache: *const EpochTransitionCache,
+) !void {
     // Get the validators sub tree once for all the loop
-    const validators = state.validators();
+    var validators = try state.validators();
 
     // TODO: Batch set this properties in the tree at once with setMany() or setNodes()
 
     // process ejections
-    for (cache.indices_to_eject.items) |index| {
+    for (cache.indices_to_eject.items) |i| {
         // set validator exit epoch and withdrawable epoch
         // TODO: Figure out a way to quickly set properties on the validators tree
-        const validator = &validators.items[index];
-        try initiateValidatorExit(cached_state, validator);
+        const validator = try validators.get(i);
+        try initiateValidatorExit(fork, config, epoch_cache, state, validator);
     }
 
     // set new activation eligibilities
-    for (cache.indices_eligible_for_activation_queue.items) |index| {
-        validators.items[index].activation_eligibility_epoch = epoch_cache.epoch + 1;
+    for (cache.indices_eligible_for_activation_queue.items) |i| {
+        var validator = try validators.get(i);
+        try validator.set("activation_eligibility_epoch", epoch_cache.epoch + 1);
     }
 
-    const finality_epoch = state.finalizedCheckpoint().epoch;
-    const len = if (state.isPreElectra()) @min(cache.indices_eligible_for_activation.items.len, epoch_cache.activation_churn_limit) else cache.indices_eligible_for_activation.items.len;
+    const finalized_epoch = try state.finalizedEpoch();
+    const len = if (comptime fork.lt(.electra)) @min(cache.indices_eligible_for_activation.items.len, epoch_cache.activation_churn_limit) else cache.indices_eligible_for_activation.items.len;
     const activation_epoch = computeActivationExitEpoch(cache.current_epoch);
 
     // dequeue validators for activation up to churn limit
     for (0..len) |i| {
         const validator_index = cache.indices_eligible_for_activation.items[i];
-        const validator = &validators.items[validator_index];
+        var validator = try validators.get(validator_index);
         // placement in queue is finalized
-        if (validator.activation_eligibility_epoch > finality_epoch) {
+        if ((try validator.get("activation_eligibility_epoch")) > finalized_epoch) {
             // remaining validators all have an activationEligibilityEpoch that is higher anyway, break early
             // activationEligibilityEpoch has been sorted in epoch process in ascending order.
             // At that point the finalityEpoch was not known because processJustificationAndFinalization() wasn't called yet.
             // So we need to filter by finalityEpoch here to comply with the spec.
             break;
         }
-        validator.activation_epoch = activation_epoch;
+        try validator.set("activation_epoch", activation_epoch);
     }
+}
+
+const std = @import("std");
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+
+test "processRegistryUpdates - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
+
+    try processRegistryUpdates(
+        .electra,
+        test_state.cached_state.config,
+        test_state.cached_state.epoch_cache,
+        test_state.cached_state.state.castToFork(.electra),
+        test_state.epoch_transition_cache,
+    );
 }

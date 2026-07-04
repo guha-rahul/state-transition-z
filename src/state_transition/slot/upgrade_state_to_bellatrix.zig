@@ -1,13 +1,14 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
-const ssz = @import("consensus_types");
+const BeaconConfig = @import("config").BeaconConfig;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
+const BeaconState = @import("fork_types").BeaconState;
+const ct = @import("consensus_types");
 
-pub fn upgradeStateToBellatrix(allocator: Allocator, cached_state: *CachedBeaconStateAllForks) !void {
-    var state = cached_state.state;
-    if (!state.isAltair()) {
-        return error.StateIsNotAltair;
-    }
+pub fn upgradeStateToBellatrix(
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    altair_state: *BeaconState(.altair),
+) !BeaconState(.bellatrix) {
 
     // Get underlying node and cast altair tree to bellatrix tree
     //
@@ -42,16 +43,16 @@ pub fn upgradeStateToBellatrix(allocator: Allocator, cached_state: *CachedBeacon
     // next_sync_committee           | -   | next_sync_committee
     // -                             | new | latest_execution_payload_header
 
-    const altair_state = state.altair;
-    defer {
-        ssz.altair.BeaconState.deinit(allocator, altair_state);
-        allocator.destroy(altair_state);
-    }
+    var state = try altair_state.upgradeUnsafe();
+    errdefer state.deinit();
 
-    _ = try state.upgradeUnsafe(allocator);
-    state.forkPtr().* = .{
-        .previous_version = altair_state.fork.current_version,
-        .current_version = cached_state.config.chain.BELLATRIX_FORK_VERSION,
-        .epoch = cached_state.getEpochCache().epoch,
+    const new_fork: ct.phase0.Fork.Type = .{
+        .previous_version = try altair_state.forkCurrentVersion(),
+        .current_version = config.chain.BELLATRIX_FORK_VERSION,
+        .epoch = epoch_cache.epoch,
     };
+    try state.setFork(&new_fork);
+
+    altair_state.deinit();
+    return state;
 }

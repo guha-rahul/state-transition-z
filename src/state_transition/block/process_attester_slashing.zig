@@ -1,10 +1,15 @@
 const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
+const Allocator = std.mem.Allocator;
+const BeaconConfig = @import("config").BeaconConfig;
 const ForkSeq = @import("config").ForkSeq;
+const ForkTypes = @import("fork_types").ForkTypes;
+const BeaconState = @import("fork_types").BeaconState;
 const types = @import("consensus_types");
-const AttesterSlashing = types.phase0.AttesterSlashing.Type;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
+const SlashingsCache = @import("../cache/slashings_cache.zig").SlashingsCache;
+const buildSlashingsCacheIfNeeded = @import("../cache/slashings_cache.zig").buildFromStateIfNeeded;
 const isSlashableAttestationData = @import("../utils/attestation.zig").isSlashableAttestationData;
-const getAttesterSlashableIndices = @import("../utils/attestation.zig").getAttesterSlashableIndices;
+const findAttesterSlashableIndices = @import("../utils/attestation.zig").findAttesterSlashableIndices;
 const isValidIndexedAttestation = @import("./is_valid_indexed_attestation.zig").isValidIndexedAttestation;
 const isSlashableValidator = @import("../utils/validator.zig").isSlashableValidator;
 const slashValidator = @import("./slash_validator.zig").slashValidator;
@@ -12,20 +17,47 @@ const slashValidator = @import("./slash_validator.zig").slashValidator;
 /// AS is the AttesterSlashing type
 /// - for phase0 it is `types.phase0.AttesterSlashing.Type`
 /// - for electra it is `types.electra.AttesterSlashing.Type`
-pub fn processAttesterSlashing(comptime AS: type, cached_state: *const CachedBeaconStateAllForks, attester_slashing: *const AS, verify_signature: bool) !void {
-    const state = cached_state.state;
-    const epoch = cached_state.getEpochCache().epoch;
-    try assertValidAttesterSlashing(AS, cached_state, attester_slashing, verify_signature);
+pub fn processAttesterSlashing(
+    comptime fork: ForkSeq,
+    allocator: Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *EpochCache,
+    state: *BeaconState(fork),
+    slashings_cache: *SlashingsCache,
+    current_epoch: u64,
+    attester_slashing: *const ForkTypes(fork).AttesterSlashing.Type,
+    verify_signature: bool,
+) !void {
+    try buildSlashingsCacheIfNeeded(allocator, state, slashings_cache);
+    try assertValidAttesterSlashing(
+        fork,
+        allocator,
+        config,
+        epoch_cache,
+        try state.validatorsCount(),
+        attester_slashing,
+        verify_signature,
+    );
 
-    const intersecting_indices = try getAttesterSlashableIndices(cached_state.allocator, attester_slashing);
-    defer intersecting_indices.deinit();
+    var intersecting_indices = try std.ArrayList(types.primitive.ValidatorIndex.Type).initCapacity(
+        allocator,
+        @min(
+            attester_slashing.attestation_1.attesting_indices.items.len,
+            attester_slashing.attestation_2.attesting_indices.items.len,
+        ),
+    );
+    try findAttesterSlashableIndices(allocator, attester_slashing, &intersecting_indices);
+    defer intersecting_indices.deinit(allocator);
 
     var slashed_any: bool = false;
+    var validators = try state.validators();
     // Spec requires to sort indices beforehand but we validated sorted asc AttesterSlashing in the above functions
     for (intersecting_indices.items) |validator_index| {
-        const validator = state.validators().items[validator_index];
-        if (isSlashableValidator(&validator, epoch)) {
-            try slashValidator(cached_state, validator_index, null);
+        var validator: types.phase0.Validator.Type = undefined;
+        try validators.getValue(undefined, validator_index, &validator);
+
+        if (isSlashableValidator(&validator, current_epoch)) {
+            try slashValidator(fork, config, epoch_cache, state, slashings_cache, validator_index, null);
             slashed_any = true;
         }
     }
@@ -38,15 +70,40 @@ pub fn processAttesterSlashing(comptime AS: type, cached_state: *const CachedBea
 /// AS is the AttesterSlashing type
 /// - for phase0 it is `types.phase0.AttesterSlashing.Type`
 /// - for electra it is `types.electra.AttesterSlashing.Type`
-pub fn assertValidAttesterSlashing(comptime AS: type, cached_state: *const CachedBeaconStateAllForks, attester_slashing: *const AS, verify_signatures: bool) !void {
+pub fn assertValidAttesterSlashing(
+    comptime fork: ForkSeq,
+    allocator: Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    validators_count: usize,
+    attester_slashing: *const ForkTypes(fork).AttesterSlashing.Type,
+    verify_signatures: bool,
+) !void {
     const attestations = &.{ attester_slashing.attestation_1, attester_slashing.attestation_2 };
     if (!isSlashableAttestationData(&attestations[0].data, &attestations[1].data)) {
         return error.InvalidAttesterSlashingNotSlashable;
     }
 
-    inline for (@typeInfo(AS).@"struct".fields, 0..2) |f, i| {
-        if (!try isValidIndexedAttestation(f.type, cached_state, &attestations[i], verify_signatures)) {
-            return error.InvalidAttesterSlashingAttestationInvalid;
-        }
+    if (!try isValidIndexedAttestation(
+        fork,
+        allocator,
+        config,
+        epoch_cache,
+        validators_count,
+        &attestations[0],
+        verify_signatures,
+    )) {
+        return error.InvalidAttesterSlashingAttestationInvalid;
+    }
+    if (!try isValidIndexedAttestation(
+        fork,
+        allocator,
+        config,
+        epoch_cache,
+        validators_count,
+        &attestations[1],
+        verify_signatures,
+    )) {
+        return error.InvalidAttesterSlashingAttestationInvalid;
     }
 }

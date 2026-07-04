@@ -1,12 +1,15 @@
+const std = @import("std");
+const Node = @import("persistent_merkle_tree").Node;
 const ssz = @import("consensus_types");
 const Root = ssz.primitive.Root.Type;
 const ForkSeq = @import("config").ForkSeq;
-const Preset = @import("preset").Preset;
 const preset = @import("preset").preset;
-const std = @import("std");
+const active_preset = @import("preset").active_preset;
 const state_transition = @import("state_transition");
-const TestCachedBeaconStateAllForks = state_transition.test_utils.TestCachedBeaconStateAllForks;
-const BeaconStateAllForks = state_transition.BeaconStateAllForks;
+const TestCachedBeaconState = state_transition.test_utils.TestCachedBeaconState;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
+const BeaconBlock = @import("fork_types").BeaconBlock;
+const BeaconBlockBody = @import("fork_types").BeaconBlockBody;
 const Withdrawals = ssz.capella.Withdrawals.Type;
 const WithdrawalsResult = state_transition.WithdrawalsResult;
 const test_case = @import("../test_case.zig");
@@ -68,27 +71,34 @@ pub const Operation = enum {
 pub const Handler = Operation;
 
 pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
-    const ForkTypes = @field(ssz, fork.forkName());
+    const ForkTypes = @field(ssz, fork.name());
     const tc_utils = TestCaseUtils(fork);
     const OpType = @field(ForkTypes, operation.operationObject());
 
     return struct {
-        pre: TestCachedBeaconStateAllForks,
+        pre: TestCachedBeaconState,
         // a null post state means the test is expected to fail
-        post: ?BeaconStateAllForks,
+        post: ?*AnyBeaconState,
         op: OpType.Type,
         bls_setting: BlsSetting,
 
         const Self = @This();
 
-        pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
-            defer tc.deinit();
+        pub fn execute(allocator: std.mem.Allocator, dir: std.Io.Dir) !void {
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
+            defer {
+                tc.deinit();
+                state_transition.deinitStateTransition(std.testing.io);
+            }
 
             try tc.runTest();
         }
 
-        pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir) !Self {
+        pub fn init(allocator: std.mem.Allocator, pool: *Node.Pool, dir: std.Io.Dir) !Self {
             var tc = Self{
                 .pre = undefined,
                 .post = undefined,
@@ -97,11 +107,11 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
             };
 
             // load pre state
-            tc.pre = try tc_utils.loadPreState(allocator, dir);
+            tc.pre = try tc_utils.loadPreState(allocator, pool, dir);
             errdefer tc.pre.deinit();
 
             // load pre state
-            tc.post = try tc_utils.loadPostState(allocator, dir);
+            tc.post = try tc_utils.loadPostState(allocator, pool, dir);
 
             // load the op
             try loadSszValue(OpType, allocator, dir, comptime operation.inputName() ++ ".ssz_snappy", &tc.op);
@@ -119,88 +129,172 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                 OpType.deinit(self.pre.allocator, &self.op);
             }
             self.pre.deinit();
-            if (self.post) |*post| {
-                post.deinit(self.pre.allocator);
+            if (self.post) |post| {
+                post.deinit();
+                self.pre.allocator.destroy(post);
             }
         }
 
         pub fn process(self: *Self) !void {
             const verify = self.bls_setting.verify();
             const allocator = self.pre.allocator;
+            const cached_state = self.pre.cached_state;
+            const state = cached_state.state.castToFork(fork);
 
             switch (operation) {
                 .attestation => {
-                    const attestations_fork: ForkSeq = if (fork.gte(.electra)) .electra else .phase0;
-                    var attestations = @field(ssz, attestations_fork.forkName()).Attestations.default_value;
-                    defer attestations.deinit(allocator);
-                    const attestation: *@field(ssz, attestations_fork.forkName()).Attestation.Type = @ptrCast(@alignCast(&self.op));
-                    try attestations.append(allocator, attestation.*);
-                    const atts = attestations;
-                    const attestations_wrapper: state_transition.Attestations = if (fork.gte(.electra))
-                        .{ .electra = &atts }
-                    else
-                        .{ .phase0 = &atts };
-
-                    try state_transition.processAttestations(allocator, self.pre.cached_state, attestations_wrapper, verify);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    var attestations = [_]ForkTypes.Attestation.Type{self.op};
+                    try state_transition.processAttestations(
+                        fork,
+                        allocator,
+                        config,
+                        epoch_cache,
+                        state,
+                        &cached_state.slashings_cache,
+                        attestations[0..],
+                        verify,
+                    );
                 },
                 .attester_slashing => {
-                    try state_transition.processAttesterSlashing(OpType.Type, self.pre.cached_state, &self.op, verify);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    const current_epoch = epoch_cache.epoch;
+                    try state_transition.processAttesterSlashing(
+                        fork,
+                        allocator,
+                        config,
+                        epoch_cache,
+                        state,
+                        &cached_state.slashings_cache,
+                        current_epoch,
+                        &self.op,
+                        verify,
+                    );
                 },
                 .block_header => {
-                    const block = state_transition.Block{ .regular = @unionInit(state_transition.BeaconBlock, @tagName(fork), &self.op) };
-                    try state_transition.processBlockHeader(allocator, self.pre.cached_state, block);
+                    const epoch_cache = cached_state.epoch_cache;
+                    const fork_block = BeaconBlock(.full, fork){ .inner = self.op };
+                    try state_transition.processBlockHeader(
+                        fork,
+                        allocator,
+                        epoch_cache,
+                        state,
+                        .full,
+                        &fork_block,
+                    );
                 },
                 .bls_to_execution_change => {
-                    try state_transition.processBlsToExecutionChange(self.pre.cached_state, &self.op);
+                    const config = cached_state.config;
+                    try state_transition.processBlsToExecutionChange(fork, config, state, &self.op);
                 },
                 .consolidation_request => {
-                    try state_transition.processConsolidationRequest(allocator, self.pre.cached_state, &self.op);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processConsolidationRequest(fork, config, epoch_cache, state, &self.op);
                 },
                 .deposit => {
-                    try state_transition.processDeposit(allocator, self.pre.cached_state, &self.op);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processDeposit(fork, allocator, config, epoch_cache, state, &self.op);
                 },
                 .deposit_request => {
-                    try state_transition.processDepositRequest(allocator, self.pre.cached_state, &self.op);
+                    try state_transition.processDepositRequest(fork, state, &self.op);
                 },
                 .execution_payload => {
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    const current_epoch = epoch_cache.epoch;
+                    const fork_body = BeaconBlockBody(.full, fork){ .inner = self.op };
                     try state_transition.processExecutionPayload(
+                        fork,
                         allocator,
-                        self.pre.cached_state,
-                        .{ .regular = @unionInit(state_transition.BeaconBlockBody, @tagName(fork), &self.op) },
-                        .{ .data_availability_status = .available, .execution_payload_status = if (self.post != null) .valid else .invalid },
+                        config,
+                        state,
+                        current_epoch,
+                        .full,
+                        &fork_body,
+                        .{
+                            .data_availability_status = .available,
+                            .execution_payload_status = if (self.post != null) .valid else .invalid,
+                        },
                     );
                 },
                 .proposer_slashing => {
-                    try state_transition.processProposerSlashing(self.pre.cached_state, &self.op, verify);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processProposerSlashing(
+                        fork,
+                        allocator,
+                        config,
+                        epoch_cache,
+                        state,
+                        &cached_state.slashings_cache,
+                        &self.op,
+                        verify,
+                    );
                 },
                 .sync_aggregate => {
-                    try state_transition.processSyncAggregate(allocator, self.pre.cached_state, &self.op, verify);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processSyncAggregate(
+                        fork,
+                        allocator,
+                        config,
+                        epoch_cache,
+                        state,
+                        &self.op,
+                        verify,
+                    );
                 },
                 .voluntary_exit => {
-                    try state_transition.processVoluntaryExit(self.pre.cached_state, &self.op, verify);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processVoluntaryExit(
+                        fork,
+                        config,
+                        epoch_cache,
+                        state,
+                        &self.op,
+                        verify,
+                    );
                 },
                 .withdrawal_request => {
-                    try state_transition.processWithdrawalRequest(allocator, self.pre.cached_state, &self.op);
+                    const config = cached_state.config;
+                    const epoch_cache = cached_state.epoch_cache;
+                    try state_transition.processWithdrawalRequest(fork, config, epoch_cache, state, &self.op);
                 },
                 .withdrawals => {
+                    const epoch_cache = cached_state.epoch_cache;
+
+                    var withdrawals_buf: [preset.MAX_WITHDRAWALS_PER_PAYLOAD]ssz.capella.Withdrawal.Type = undefined;
                     var withdrawals_result = WithdrawalsResult{
-                        .withdrawals = try Withdrawals.initCapacity(
-                            allocator,
-                            preset.MAX_WITHDRAWALS_PER_PAYLOAD,
-                        ),
+                        .withdrawals = Withdrawals.initBuffer(&withdrawals_buf),
                     };
 
                     var withdrawal_balances = std.AutoHashMap(u64, usize).init(allocator);
                     defer withdrawal_balances.deinit();
 
-                    try state_transition.getExpectedWithdrawals(allocator, &withdrawals_result, &withdrawal_balances, self.pre.cached_state);
-                    defer withdrawals_result.withdrawals.deinit(allocator);
+                    try state_transition.getExpectedWithdrawals(
+                        fork,
+                        epoch_cache,
+                        state,
+                        &withdrawals_result,
+                        &withdrawal_balances,
+                    );
 
                     var payload_withdrawals_root: Root = undefined;
                     // self.op is ExecutionPayload in this case
                     try ssz.capella.Withdrawals.hashTreeRoot(allocator, &self.op.withdrawals, &payload_withdrawals_root);
 
-                    try state_transition.processWithdrawals(allocator, self.pre.cached_state, withdrawals_result, payload_withdrawals_root);
+                    try state_transition.processWithdrawals(
+                        fork,
+                        allocator,
+                        state,
+                        withdrawals_result,
+                        payload_withdrawals_root,
+                    );
                 },
             }
         }
@@ -208,7 +302,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
         pub fn runTest(self: *Self) !void {
             if (self.post) |post| {
                 try self.process();
-                try expectEqualBeaconStates(post, self.pre.cached_state.state.*);
+                try expectEqualBeaconStates(post, self.pre.cached_state.state);
             } else {
                 self.process() catch |err| {
                     if (err == error.SkipZigTest) {

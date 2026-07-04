@@ -1,0 +1,1336 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Node = @import("persistent_merkle_tree").Node;
+const Gindex = @import("persistent_merkle_tree").Gindex;
+const isBasicType = @import("../type/type_kind.zig").isBasicType;
+const assertTreeViewType = @import("utils/assert.zig").assertTreeViewType;
+const isFixedType = @import("../type/type_kind.zig").isFixedType;
+const CloneOpts = @import("utils/clone_opts.zig").CloneOpts;
+
+/// A specialized tree view for SSZ container types, enabling efficient access and modification of container fields, given a backing merkle tree.
+///
+/// This struct stores a tuples of either reference to child TreeView or basic type and provides methods to get and set fields by name.
+///
+/// For basic-type fields, it returns or accepts values directly; for complex fields, it returns or accepts corresponding tree view references.
+pub fn ContainerTreeView(comptime ST: type) type {
+    comptime var opt_treeview_types: [ST.fields.len]type = undefined;
+    inline for (ST.fields, 0..) |field, i| {
+        opt_treeview_types[i] = if (isBasicType(field.type))
+            ?field.type.Type
+        else blk: {
+            assertTreeViewType(field.type.TreeView);
+            break :blk ?*field.type.TreeView;
+        };
+    }
+
+    const TreeViewData = @Tuple(&opt_treeview_types);
+
+    const TreeView = struct {
+        allocator: Allocator,
+        pool: *Node.Pool,
+        root: Node.Id,
+
+        /// specific fields for this TreeView
+        /// a tuple of either Optional(Value) for basic type or Optional(ChildTreeView) for composite type
+        child_data: TreeViewData,
+        /// whether the corresponding child node/data has changed since the last update of the root
+        changed: std.StaticBitSet(ST.chunk_count),
+        original_nodes: [ST.chunk_count]?Node.Id,
+        /// Stable backing store for `getFieldRoot` return pointers on dirty basic fields, so the
+        /// temporary PMT node can be unref'd instead of leaking a Pool slot per call.
+        field_root_cache: [ST.chunk_count][32]u8,
+        pub const SszType = ST;
+
+        const Self = @This();
+
+        pub fn init(allocator: Allocator, pool: *Node.Pool, root: Node.Id) !*Self {
+            try pool.ref(root);
+            // Undo the ref without freeing: on init failure the caller still owns
+            // `root` and releases it; `unref` here would free a fresh rc-0 root.
+            errdefer pool.unrefUnsafe(root);
+
+            const ptr = try allocator.create(Self);
+            ptr.* = .{
+                .allocator = allocator,
+                .pool = pool,
+                .child_data = .{null} ** ST.chunk_count,
+                .original_nodes = .{null} ** ST.chunk_count,
+                .root = root,
+                .changed = std.StaticBitSet(ST.chunk_count).initEmpty(),
+                .field_root_cache = undefined,
+            };
+            return ptr;
+        }
+
+        /// Clone this view, optionally moving its child-view cache to the clone.
+        /// `transfer_cache = true` invalidates any pointer from an earlier get()/getReadonly():
+        /// cached `changed` children get deinited (and get() counts as a change even on a read).
+        /// Re-fetch from whichever view you keep.
+        pub fn clone(self: *Self, opts: CloneOpts) !*Self {
+            const ptr = try init(self.allocator, self.pool, self.root);
+            if (!opts.transfer_cache) {
+                return ptr;
+            }
+
+            ptr.child_data = self.child_data;
+            ptr.original_nodes = self.original_nodes;
+
+            inline for (0..ST.fields.len) |i| {
+                if (self.changed.isSet(i)) {
+                    if (ptr.child_data[i]) |child_view_ptr| {
+                        if (!comptime isBasicType(ST.fields[i].type)) {
+                            @constCast(child_view_ptr).deinit();
+                        }
+                    }
+                    ptr.child_data[i] = null;
+                }
+            }
+
+            // clear self's caches
+            self.child_data = .{null} ** ST.chunk_count;
+            self.original_nodes = .{null} ** ST.chunk_count;
+            self.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+
+            return ptr;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.clearChildrenDataCache();
+            self.pool.unref(self.root);
+            self.allocator.destroy(self);
+        }
+
+        fn clearChildrenDataCache(self: *Self) void {
+            inline for (self.child_data, 0..) |child_opt, i| {
+                if (child_opt) |child| {
+                    if (!comptime isBasicType(ST.fields[i].type)) {
+                        @constCast(child).deinit();
+                    }
+                    self.child_data[i] = null;
+                }
+            }
+            inline for (0..ST.chunk_count) |i| {
+                // these nodes are unref by root
+                self.original_nodes[i] = null;
+            }
+            self.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+        }
+
+        pub fn commit(self: *Self) !void {
+            if (self.changed.count() == 0) {
+                return;
+            }
+
+            var nodes: [ST.chunk_count]Node.Id = undefined;
+            var indices: [ST.chunk_count]usize = undefined;
+
+            var changed_idx: usize = 0;
+            inline for (ST.fields, 0..) |field, i| {
+                if (self.changed.isSet(i)) {
+                    const ChildST = ST.getFieldType(field.name);
+                    if (comptime isBasicType(ChildST)) {
+                        const child_value = self.child_data[i] orelse return error.MissingChildValue;
+                        const child_node = try ChildST.tree.fromValue(
+                            self.pool,
+                            &child_value,
+                        );
+                        nodes[changed_idx] = child_node;
+                        indices[changed_idx] = i;
+                        self.original_nodes[i] = child_node;
+                        changed_idx += 1;
+                    } else {
+                        var child_view = self.child_data[i] orelse return error.MissingChildView;
+                        try child_view.commit();
+                        const child_changed = if (self.original_nodes[i]) |orig_node| blk: {
+                            break :blk orig_node != child_view.getRoot();
+                        } else true;
+                        if (child_changed) {
+                            nodes[changed_idx] = child_view.getRoot();
+                            self.original_nodes[i] = child_view.getRoot();
+                            indices[changed_idx] = i;
+                            changed_idx += 1;
+                        }
+                        // else child_view is not changed
+                    }
+                }
+            }
+
+            self.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+            if (changed_idx == 0) {
+                return;
+            }
+            const new_root = try self.root.setNodesAtDepth(self.pool, ST.chunk_depth, indices[0..changed_idx], nodes[0..changed_idx]);
+            try self.pool.ref(new_root);
+            self.pool.unref(self.root);
+            self.root = new_root;
+        }
+
+        pub fn getRoot(self: *const Self) Node.Id {
+            return self.root;
+        }
+
+        pub fn hashTreeRootInto(self: *Self, out: *[32]u8) !void {
+            try self.commit();
+            out.* = self.root.getRoot(self.pool).*;
+        }
+
+        pub fn getRootNode(self: *Self, comptime field_name: []const u8) !Node.Id {
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const existing = self.original_nodes[field_index];
+            if (existing) |node| {
+                return node;
+            } else {
+                const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                self.original_nodes[field_index] = node;
+                return node;
+            }
+        }
+
+        pub fn setRootNode(self: *Self, comptime field_name: []const u8, root: Node.Id) !void {
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                // TODO: should support this? in this implement it uses value for basic type
+                return error.InvalidRootNodeForBasicType;
+            }
+
+            const field_data = try ChildST.TreeView.init(self.allocator, self.pool, root);
+            try self.set(field_name, field_data);
+        }
+
+        pub fn Field(comptime field_name: []const u8) type {
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                return ChildST.Type;
+            } else {
+                return *ChildST.TreeView;
+            }
+        }
+
+        /// Get a field by name. If the field is a basic type, returns the value directly.
+        /// Caller borrows a reference to child value so there is no need to deinit it.
+        ///
+        /// A composite field returns a borrowed *TreeView owned by this parent. A later set() on
+        /// the field or a clone(transfer_cache) invalidates it — re-get() instead. (This also
+        /// marks the field changed, even though it's a read.)
+        pub fn get(self: *Self, comptime field_name: []const u8) !Field(field_name) {
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                const existing = self.child_data[field_index];
+                if (existing) |child_value| {
+                    return child_value;
+                } else {
+                    const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                    var child_value: ChildST.Type = undefined;
+                    try ChildST.tree.toValue(node, self.pool, &child_value);
+                    self.original_nodes[field_index] = node;
+                    self.child_data[field_index] = child_value;
+                    return child_value;
+                }
+            } else {
+                self.changed.set(field_index);
+
+                const existing_ptr = self.child_data[field_index];
+                if (existing_ptr) |child_view_ptr| {
+                    return child_view_ptr;
+                } else {
+                    const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                    self.original_nodes[field_index] = node;
+                    self.child_data[field_index] = try ChildST.TreeView.init(self.allocator, self.pool, node);
+                    return self.child_data[field_index].?;
+                }
+            }
+        }
+
+        /// Set a field by name. If the field is a basic type, pass the value directly.
+        /// If the field is a complex type, pass a TreeView of the corresponding type.
+        /// The caller transfers ownership of the `value` TreeView to this parent view.
+        /// Deinits the field's existing TreeView, so any earlier get()/getReadonly() of it is now
+        /// invalid. Keep `value`, or re-get() the field, to use the new view.
+        pub fn set(self: *Self, comptime field_name: []const u8, value: Field(field_name)) !void {
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const ChildST = ST.getFieldType(field_name);
+
+            if (comptime isBasicType(ChildST)) {
+                const existing = self.child_data[field_index];
+                if (existing) |child_value| {
+                    if (child_value == value) {
+                        // if consumer keeps setting a new value, do nothing
+                        return;
+                    }
+                }
+
+                self.child_data[field_index] = value;
+            } else {
+                const existing_ptr = self.child_data[field_index];
+                if (existing_ptr) |old_ptr| {
+                    if (old_ptr != value) {
+                        old_ptr.deinit();
+                    }
+                }
+
+                self.child_data[field_index] = value;
+            }
+
+            self.changed.set(field_index);
+        }
+
+        /// Serialize the tree view into a provided buffer.
+        /// Returns the number of bytes written.
+        pub fn serializeIntoBytes(self: *Self, out: []u8) !usize {
+            try self.commit();
+            return try ST.tree.serializeIntoBytes(self.root, self.pool, out);
+        }
+
+        /// Get the serialized size of this tree view.
+        pub fn serializedSize(self: *Self) !usize {
+            try self.commit();
+            if (comptime isFixedType(ST)) {
+                return ST.fixed_size;
+            } else {
+                return ST.tree.serializedSize(self.root, self.pool);
+            }
+        }
+
+        pub fn deserialize(allocator: Allocator, pool: *Node.Pool, bytes: []const u8) !*Self {
+            const root = try ST.tree.deserializeFromBytes(pool, bytes);
+            errdefer pool.unref(root);
+            return try Self.init(allocator, pool, root);
+        }
+
+        pub fn fromValue(allocator: Allocator, pool: *Node.Pool, value: *const ST.Type) !*Self {
+            const root = try ST.tree.fromValue(pool, value);
+            errdefer pool.unref(root);
+            const self = try Self.init(allocator, pool, root);
+            return self;
+        }
+
+        pub fn toValue(self: *Self, allocator: Allocator, out: *ST.Type) !void {
+            try self.commit();
+            if (comptime isFixedType(ST)) {
+                try ST.tree.toValue(self.root, self.pool, out);
+            } else {
+                try ST.tree.toValue(allocator, self.root, self.pool, out);
+            }
+        }
+
+        /// Return the SSZ value type for a given field name.
+        pub fn FieldValue(comptime field_name: []const u8) type {
+            const ChildST = ST.getFieldType(field_name);
+            return ChildST.Type;
+        }
+
+        /// Return the root hash of the tree.
+        /// The returned array is owned by the internal pool and must not be modified.
+        pub fn hashTreeRoot(self: *Self) !*const [32]u8 {
+            try self.commit();
+            return self.root.getRoot(self.pool);
+        }
+
+        /// Get the hash tree root of a specific field by name.
+        /// For composite fields, commits the child view first if it has changes.
+        pub fn getFieldRoot(self: *Self, comptime field_name: []const u8) !*const [32]u8 {
+            comptime {
+                @setEvalBranchQuota(20000);
+            }
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                if (self.child_data[field_index]) |child_value| {
+                    const node = try ChildST.tree.fromValue(self.pool, &child_value);
+                    defer self.pool.unref(node);
+                    self.field_root_cache[field_index] = node.getRoot(self.pool).*;
+                    return &self.field_root_cache[field_index];
+                }
+                const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                return node.getRoot(self.pool);
+            } else {
+                // For composite types, if we have a cached view, commit it and return its root
+                if (self.child_data[field_index]) |child_view_ptr| {
+                    try child_view_ptr.commit();
+                    return child_view_ptr.getRoot().getRoot(self.pool);
+                } else {
+                    const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                    return node.getRoot(self.pool);
+                }
+            }
+        }
+
+        /// Like get() but doesn't mark the field changed. A composite field returns a borrowed
+        /// *TreeView owned by this parent; a later set() on the field or clone(transfer_cache)
+        /// invalidates it. Don't deinit it.
+        pub fn getReadonly(self: *Self, comptime field_name: []const u8) !Field(field_name) {
+            comptime {
+                @setEvalBranchQuota(20000);
+            }
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                const existing = self.child_data[field_index];
+                if (existing) |child_value| {
+                    return child_value;
+                } else {
+                    const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                    var child_value: ChildST.Type = undefined;
+                    try ChildST.tree.toValue(node, self.pool, &child_value);
+                    return child_value;
+                }
+            } else {
+                // Unlike get(), do NOT add to self.changed
+                const existing_ptr = self.child_data[field_index];
+                if (existing_ptr) |child_view_ptr| {
+                    return child_view_ptr;
+                } else {
+                    const node = try self.root.getNodeAtDepth(self.pool, ST.chunk_depth, field_index);
+                    const child_view = try ChildST.TreeView.init(self.allocator, self.pool, node);
+                    self.child_data[field_index] = child_view;
+                    return child_view;
+                }
+            }
+        }
+
+        /// Get a field value as an SSZ value type (copied out).
+        pub fn getValue(self: *Self, allocator: Allocator, comptime field_name: []const u8, out: *FieldValue(field_name)) !void {
+            comptime {
+                @setEvalBranchQuota(20000);
+            }
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                out.* = try self.getReadonly(field_name);
+            } else {
+                var child_view = try self.getReadonly(field_name);
+                try child_view.toValue(allocator, out);
+            }
+        }
+
+        /// Set a field from an SSZ value type.
+        /// For basic types, sets the value directly. For composite types, creates a TreeView from the value.
+        pub fn setValue(self: *Self, comptime field_name: []const u8, value: *const FieldValue(field_name)) !void {
+            comptime {
+                @setEvalBranchQuota(20000);
+            }
+            const ChildST = ST.getFieldType(field_name);
+            if (comptime isBasicType(ChildST)) {
+                try self.set(field_name, value.*);
+            } else {
+                const child_view = try ChildST.TreeView.fromValue(self.allocator, self.pool, value);
+                errdefer child_view.deinit();
+                try self.set(field_name, child_view);
+            }
+        }
+    };
+
+    assertTreeViewType(TreeView);
+    return TreeView;
+}
+
+/// TreeView companion to `StructContainerType`.
+///
+/// The backing Node is a single `.container_struct` slot whose payload is the
+/// fully-decoded struct value. This view caches a copy of that value and
+/// re-creates a new container_struct Node on `commit` if any field was mutated.
+///
+/// Field reads/writes are O(1) (direct struct access) — there is no per-field
+/// child TreeView and no per-field merkle navigation.
+pub fn StructContainerTreeView(comptime ST: type) type {
+    const T = ST.Type;
+
+    const TreeView = struct {
+        allocator: Allocator,
+        pool: *Node.Pool,
+        root: Node.Id,
+        /// Cached copy of the deserialized struct. Mutated in place by `set`.
+        value: T,
+        /// Bit per field; tracks whether `value` diverges from `root`.
+        changed: std.StaticBitSet(ST.chunk_count),
+        /// Stable backing store for `getFieldRoot` return pointers. The hash
+        /// is computed in place here so we can return `*const [32]u8` without
+        /// allocating a temporary PMT slot per call (which previously leaked).
+        field_root_cache: [ST.chunk_count][32]u8,
+
+        pub const SszType = ST;
+
+        const Self = @This();
+
+        pub fn init(allocator: Allocator, pool: *Node.Pool, root: Node.Id) !*Self {
+            try pool.ref(root);
+            // Undo the ref without freeing: on init failure the caller still owns
+            // `root` and releases it; `unref` here would free a fresh rc-0 root.
+            errdefer pool.unrefUnsafe(root);
+
+            const ptr = try allocator.create(Self);
+            errdefer allocator.destroy(ptr);
+
+            try ST.tree.toValue(root, pool, &ptr.value);
+
+            ptr.allocator = allocator;
+            ptr.pool = pool;
+            ptr.root = root;
+            ptr.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+            ptr.field_root_cache = undefined;
+            return ptr;
+        }
+
+        /// Clones the committed state; uncommitted writes are dropped (from the source too on
+        /// transfer), matching the other tree views.
+        pub fn clone(self: *Self, opts: CloneOpts) !*Self {
+            try self.pool.ref(self.root);
+            errdefer self.pool.unref(self.root);
+
+            const ptr = try self.allocator.create(Self);
+            errdefer self.allocator.destroy(ptr);
+
+            ptr.allocator = self.allocator;
+            ptr.pool = self.pool;
+            ptr.root = self.root;
+            ptr.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+
+            if (opts.transfer_cache and self.changed.count() == 0) {
+                ptr.value = self.value;
+            } else {
+                try ST.tree.toValue(self.root, self.pool, &ptr.value);
+            }
+            if (opts.transfer_cache and self.changed.count() != 0) {
+                self.value = ptr.value;
+                self.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+            }
+
+            return ptr;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.pool.unref(self.root);
+            self.allocator.destroy(self);
+        }
+
+        pub fn commit(self: *Self) !void {
+            if (self.changed.count() == 0) return;
+
+            const new_root = try ST.tree.fromValue(self.pool, &self.value);
+            try self.pool.ref(new_root);
+            self.pool.unref(self.root);
+            self.root = new_root;
+            self.changed = std.StaticBitSet(ST.chunk_count).initEmpty();
+        }
+
+        pub fn getRoot(self: *const Self) Node.Id {
+            return self.root;
+        }
+
+        pub fn hashTreeRootInto(self: *Self, out: *[32]u8) !void {
+            try self.commit();
+            out.* = self.root.getRoot(self.pool).*;
+        }
+
+        pub fn hashTreeRoot(self: *Self) !*const [32]u8 {
+            try self.commit();
+            return self.root.getRoot(self.pool);
+        }
+
+        pub fn getFieldRoot(self: *Self, comptime field_name: []const u8) !*const [32]u8 {
+            const ChildST = ST.getFieldType(field_name);
+            const field_index = comptime ST.getFieldIndex(field_name);
+            const field_value = try self.get(field_name);
+            // Materialize a temporary PMT subtree just to compute the cached
+            // root, then unref it immediately. The hash bytes are copied into
+            // `field_root_cache` so the returned pointer remains valid for the
+            // view's lifetime — without leaking a Pool slot per call.
+            const node = try ChildST.tree.fromValue(self.pool, &field_value);
+            defer self.pool.unref(node);
+            self.field_root_cache[field_index] = node.getRoot(self.pool).*;
+            return &self.field_root_cache[field_index];
+        }
+
+        pub fn deserialize(allocator: Allocator, pool: *Node.Pool, bytes: []const u8) !*Self {
+            const root = try ST.tree.deserializeFromBytes(pool, bytes);
+            errdefer pool.unref(root);
+            return try Self.init(allocator, pool, root);
+        }
+
+        pub fn fromValue(allocator: Allocator, pool: *Node.Pool, value: *const ST.Type) !*Self {
+            const root = try ST.tree.fromValue(pool, value);
+            errdefer pool.unref(root);
+            return try Self.init(allocator, pool, root);
+        }
+
+        pub fn toValue(self: *Self, allocator: Allocator, out: *ST.Type) !void {
+            _ = allocator;
+            try self.commit();
+            try ST.clone(&self.value, out);
+        }
+
+        pub fn Field(comptime field_name: []const u8) type {
+            const ChildST = ST.getFieldType(field_name);
+            return ChildST.Type;
+        }
+
+        pub fn FieldValue(comptime field_name: []const u8) type {
+            const ChildST = ST.getFieldType(field_name);
+            return ChildST.Type;
+        }
+
+        pub fn get(self: *Self, comptime field_name: []const u8) !Field(field_name) {
+            return @field(self.value, field_name);
+        }
+
+        pub fn getReadonly(self: *Self, comptime field_name: []const u8) !Field(field_name) {
+            return @field(self.value, field_name);
+        }
+
+        pub fn set(self: *Self, comptime field_name: []const u8, value: Field(field_name)) !void {
+            @field(self.value, field_name) = value;
+            const idx = comptime ST.getFieldIndex(field_name);
+            self.changed.set(idx);
+        }
+
+        pub fn getValue(self: *Self, allocator: Allocator, comptime field_name: []const u8, out: *FieldValue(field_name)) !void {
+            _ = allocator;
+            out.* = try self.get(field_name);
+        }
+
+        pub fn setValue(self: *Self, comptime field_name: []const u8, value: *const FieldValue(field_name)) !void {
+            try self.set(field_name, value.*);
+        }
+
+        pub fn serializeIntoBytes(self: *Self, out: []u8) !usize {
+            try self.commit();
+            return ST.serializeIntoBytes(&self.value, out);
+        }
+
+        pub fn serializedSize(_: *const Self) usize {
+            return ST.fixed_size;
+        }
+    };
+
+    assertTreeViewType(TreeView);
+    return TreeView;
+}
+
+test "StructContainerTreeView - basic get/set/commit/root" {
+    const allocator = std.testing.allocator;
+    const StructValidator = StructContainerType(struct {
+        pubkey: ByteVectorType(48),
+        withdrawal_credentials: ByteVectorType(32),
+        effective_balance: UintType(64),
+        slashed: BoolType(),
+        activation_eligibility_epoch: UintType(64),
+        activation_epoch: UintType(64),
+        exit_epoch: UintType(64),
+        withdrawable_epoch: UintType(64),
+    });
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const v: StructValidator.Type = .{
+        .pubkey = [_]u8{0} ** 48,
+        .withdrawal_credentials = [_]u8{1} ** 32,
+        .effective_balance = 32_000_000_000,
+        .slashed = false,
+        .activation_eligibility_epoch = 0,
+        .activation_epoch = 0,
+        .exit_epoch = std.math.maxInt(u64),
+        .withdrawable_epoch = std.math.maxInt(u64),
+    };
+
+    const root_node = try StructValidator.tree.fromValue(&pool, &v);
+
+    var view = try StructContainerTreeView(StructValidator).init(allocator, &pool, root_node);
+    defer view.deinit();
+
+    var view_root: [32]u8 = undefined;
+    try view.hashTreeRootInto(&view_root);
+    var expected_root: [32]u8 = undefined;
+    try StructValidator.hashTreeRoot(&v, &expected_root);
+    try std.testing.expectEqualSlices(u8, &expected_root, &view_root);
+
+    try std.testing.expectEqual(@as(u64, 32_000_000_000), try view.get("effective_balance"));
+    try std.testing.expectEqual(false, try view.get("slashed"));
+
+    try view.set("effective_balance", 32_100_000_000);
+    try view.set("slashed", true);
+    try view.commit();
+
+    try std.testing.expectEqual(@as(u64, 32_100_000_000), try view.get("effective_balance"));
+    try std.testing.expectEqual(true, try view.get("slashed"));
+
+    var v2 = v;
+    v2.effective_balance = 32_100_000_000;
+    v2.slashed = true;
+    var expected2: [32]u8 = undefined;
+    try StructValidator.hashTreeRoot(&v2, &expected2);
+    var view_root2: [32]u8 = undefined;
+    try view.hashTreeRootInto(&view_root2);
+    try std.testing.expectEqualSlices(u8, &expected2, &view_root2);
+}
+
+test "ContainerTreeView" {
+    const Foo = FixedContainerType(struct {
+        a: UintType(64),
+        b: UintType(64),
+    });
+
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 1000 });
+    defer pool.deinit();
+
+    const foo_value: Foo.Type = .{
+        .a = 123,
+        .b = 456,
+    };
+    const root_node = try Foo.tree.fromValue(&pool, &foo_value);
+    var foo_view = try ContainerTreeView(Foo).init(std.testing.allocator, &pool, root_node);
+    defer foo_view.deinit();
+
+    // test get() and set() and commit()
+    try std.testing.expectEqual(123, try foo_view.get("a"));
+    try std.testing.expectEqual(456, try foo_view.get("b"));
+    try foo_view.set("a", 1230);
+    try std.testing.expectEqual(1230, try foo_view.get("a"));
+    try foo_view.commit();
+    try std.testing.expectEqual(1230, try foo_view.get("a"));
+
+    // test hashTreeRoot()
+    var value_root: [32]u8 = undefined;
+    var expected_foo_value: Foo.Type = .{ .a = 1230, .b = 456 };
+    try Foo.hashTreeRoot(&expected_foo_value, &value_root);
+    var view_root: [32]u8 = undefined;
+    try foo_view.hashTreeRootInto(&view_root);
+    try std.testing.expectEqualSlices(u8, value_root[0..], view_root[0..]);
+
+    const Bar = FixedContainerType(struct {
+        foo: Foo,
+        c: UintType(32),
+    });
+
+    const bar_value: Bar.Type = .{
+        .foo = foo_value,
+        .c = 789,
+    };
+    const bar_root_node = try Bar.tree.fromValue(&pool, &bar_value);
+    var bar_view = try ContainerTreeView(Bar).init(std.testing.allocator, &pool, bar_root_node);
+    defer bar_view.deinit();
+
+    // test nested get() and set() and commit()
+    var foo_field_view = try bar_view.get("foo");
+    try std.testing.expectEqual(123, try foo_field_view.get("a"));
+    try std.testing.expectEqual(456, try foo_field_view.get("b"));
+    try std.testing.expectEqual(789, try bar_view.get("c"));
+
+    try foo_field_view.set("a", 1230);
+    try std.testing.expectEqual(1230, try foo_field_view.get("a"));
+    try bar_view.commit();
+    try std.testing.expectEqual(1230, try foo_field_view.get("a"));
+
+    // test hashTreeRoot() after nested modification
+    const expected_bar_value: Bar.Type = .{
+        .foo = .{ .a = 1230, .b = 456 },
+        .c = 789,
+    };
+    try Bar.hashTreeRoot(&expected_bar_value, &value_root);
+    try bar_view.hashTreeRootInto(&view_root);
+    try std.testing.expectEqualSlices(u8, value_root[0..], view_root[0..]);
+
+    const cloned_foo_view_node = try Foo.tree.fromValue(&pool, &expected_foo_value);
+    const cloned_foo_view = try ContainerTreeView(Foo).init(std.testing.allocator, &pool, cloned_foo_view_node);
+    // do not deinit cloned_foo_view, it will be transferred
+    try bar_view.set("foo", cloned_foo_view);
+    try bar_view.hashTreeRootInto(&view_root);
+    try std.testing.expectEqualSlices(u8, value_root[0..], view_root[0..]);
+}
+
+const FixedContainerType = @import("../type/container.zig").FixedContainerType;
+const VariableContainerType = @import("../type/container.zig").VariableContainerType;
+const StructContainerType = @import("../type/container.zig").StructContainerType;
+const UintType = @import("../type/uint.zig").UintType;
+const ByteVectorType = @import("../type/byte_vector.zig").ByteVectorType;
+const BoolType = @import("../type/bool.zig").BoolType;
+const ByteListType = @import("../type/byte_list.zig").ByteListType;
+const FixedListType = @import("../type/list.zig").FixedListType;
+const VariableListType = @import("../type/list.zig").VariableListType;
+const FixedVectorType = @import("../type/vector.zig").FixedVectorType;
+
+const Checkpoint = FixedContainerType(struct {
+    epoch: UintType(64),
+    root: ByteVectorType(32),
+});
+
+test "TreeView container field roundtrip" {
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 1000 });
+    defer pool.deinit();
+    const checkpoint: Checkpoint.Type = .{
+        .epoch = 42,
+        .root = [_]u8{1} ** 32,
+    };
+
+    const root_node = try Checkpoint.tree.fromValue(&pool, &checkpoint);
+    var cp_view = try Checkpoint.TreeView.init(std.testing.allocator, &pool, root_node);
+    defer cp_view.deinit();
+
+    // get field "epoch"
+    try std.testing.expectEqual(42, try cp_view.get("epoch"));
+
+    // get field "root"
+    var root_view = try cp_view.get("root");
+    var root = [_]u8{0} ** 32;
+    const RootView = @typeInfo(Checkpoint.TreeView.Field("root")).pointer.child;
+    try RootView.SszType.tree.toValue(root_view.getRoot(), &pool, root[0..]);
+    try std.testing.expectEqualSlices(u8, ([_]u8{1} ** 32)[0..], root[0..]);
+
+    // modify field "epoch"
+    try cp_view.set("epoch", 100);
+    try std.testing.expectEqual(100, try cp_view.get("epoch"));
+
+    // modify field "root"
+    var new_root = [_]u8{2} ** 32;
+    const new_root_node = try RootView.SszType.tree.fromValue(&pool, &new_root);
+    const new_root_view = try RootView.init(std.testing.allocator, &pool, new_root_node);
+    try cp_view.set("root", new_root_view);
+
+    // confirm "root" has been modified
+    root_view = try cp_view.get("root");
+    try RootView.SszType.tree.toValue(root_view.getRoot(), &pool, root[0..]);
+    try std.testing.expectEqualSlices(u8, ([_]u8{2} ** 32)[0..], root[0..]);
+
+    // commit and check hash_tree_root
+    try cp_view.commit();
+    var htr_from_value: [32]u8 = undefined;
+    const expected_checkpoint: Checkpoint.Type = .{
+        .epoch = 100,
+        .root = [_]u8{2} ** 32,
+    };
+    try Checkpoint.hashTreeRoot(&expected_checkpoint, &htr_from_value);
+
+    var htr_from_tree: [32]u8 = undefined;
+    try cp_view.hashTreeRootInto(&htr_from_tree);
+
+    try std.testing.expectEqualSlices(
+        u8,
+        &htr_from_value,
+        &htr_from_tree,
+    );
+}
+
+test "StructContainerTreeView clone drops uncommitted changes" {
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 256 });
+    defer pool.deinit();
+
+    const StructCheckpoint = StructContainerType(struct {
+        epoch: UintType(64),
+        root: ByteVectorType(32),
+    });
+    const value: StructCheckpoint.Type = .{ .epoch = 1, .root = [_]u8{1} ** 32 };
+    var view = try StructCheckpoint.TreeView.fromValue(std.testing.allocator, &pool, &value);
+    defer view.deinit();
+    const committed_root = view.getRoot();
+
+    try view.set("epoch", 9);
+    var cloned = try view.clone(.{});
+    defer cloned.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1), try cloned.get("epoch"));
+    try std.testing.expectEqual(@as(u64, 1), try view.get("epoch"));
+    try std.testing.expectEqual(committed_root, cloned.getRoot());
+    try std.testing.expectEqual(committed_root, view.getRoot());
+
+    try view.set("epoch", 5);
+    var kept = try view.clone(.{ .transfer_cache = false });
+    defer kept.deinit();
+    try std.testing.expectEqual(@as(u64, 1), try kept.get("epoch"));
+    try std.testing.expectEqual(@as(u64, 5), try view.get("epoch"));
+}
+
+const DoubleFreeDetectAllocator = @import("testing_allocators").DoubleFreeDetectAllocator;
+
+test "TreeView container setValue/commit - OOM does not double-free" {
+    const new_root_bytes: [32]u8 = [_]u8{0xee} ** 32;
+
+    var fail_at: usize = 0;
+    while (fail_at < 200) : (fail_at += 1) {
+        var oom = DoubleFreeDetectAllocator.init(std.testing.allocator, fail_at);
+        defer oom.deinit();
+        const alloc = oom.allocator();
+
+        var pool = Node.Pool.init(.{ .page_allocator = alloc, .allocator = alloc, .pool_size = 0 }) catch continue;
+        defer pool.deinit();
+
+        const checkpoint: Checkpoint.Type = .{ .epoch = 1, .root = [_]u8{1} ** 32 };
+        const root_node = Checkpoint.tree.fromValue(&pool, &checkpoint) catch continue;
+        var view = Checkpoint.TreeView.init(alloc, &pool, root_node) catch {
+            pool.unref(root_node);
+            continue;
+        };
+        defer view.deinit();
+
+        view.setValue("root", &new_root_bytes) catch {
+            try std.testing.expect(!oom.double_free);
+            continue;
+        };
+        view.commit() catch {};
+        try std.testing.expect(!oom.double_free);
+    }
+}
+
+test "TreeView container fromValue - OOM leaves no orphan pool nodes" {
+    const checkpoint: Checkpoint.Type = .{ .epoch = 7, .root = [_]u8{7} ** 32 };
+
+    var fail_at: usize = 0;
+    while (fail_at < 200) : (fail_at += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_at, .resize_fail_index = 0 });
+        var pool = Node.Pool.init(.{ .page_allocator = failing.allocator(), .allocator = failing.allocator(), .pool_size = 0 }) catch continue;
+        defer pool.deinit();
+
+        const baseline = pool.getNodesInUse();
+        const view = Checkpoint.TreeView.fromValue(failing.allocator(), &pool, &checkpoint) catch {
+            try std.testing.expectEqual(baseline, pool.getNodesInUse());
+            continue;
+        };
+        view.deinit();
+        try std.testing.expectEqual(baseline, pool.getNodesInUse());
+    }
+}
+
+test "TreeView container getFieldRoot on a dirty basic field leaves no orphan pool nodes" {
+    var pool = try Node.Pool.init(.{ .page_allocator = std.testing.allocator, .allocator = std.testing.allocator, .pool_size = 256 });
+    defer pool.deinit();
+
+    const checkpoint: Checkpoint.Type = .{ .epoch = 1, .root = [_]u8{1} ** 32 };
+    const root_node = try Checkpoint.tree.fromValue(&pool, &checkpoint);
+    var view = try Checkpoint.TreeView.init(std.testing.allocator, &pool, root_node);
+    defer view.deinit();
+
+    try view.set("epoch", 99);
+    const baseline = pool.getNodesInUse();
+
+    var expected = [_]u8{0} ** 32;
+    std.mem.writeInt(u64, expected[0..8], 99, .little);
+    for (0..10) |_| {
+        const field_root = try view.getFieldRoot("epoch");
+        try std.testing.expectEqualSlices(u8, &expected, field_root);
+    }
+    try std.testing.expectEqual(baseline, pool.getNodesInUse());
+}
+
+test "TreeView container deserialize - OOM leaves no orphan pool nodes" {
+    const value: Checkpoint.Type = .{ .epoch = 7, .root = [_]u8{0x5a} ** 32 };
+    var bytes: [Checkpoint.fixed_size]u8 = undefined;
+    _ = Checkpoint.serializeIntoBytes(&value, &bytes);
+
+    var fail_at: usize = 0;
+    while (fail_at < 200) : (fail_at += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_at, .resize_fail_index = 0 });
+        var pool = Node.Pool.init(.{ .page_allocator = failing.allocator(), .allocator = failing.allocator(), .pool_size = 0 }) catch continue;
+        defer pool.deinit();
+
+        const baseline = pool.getNodesInUse();
+        const view = Checkpoint.TreeView.deserialize(failing.allocator(), &pool, &bytes) catch {
+            try std.testing.expectEqual(baseline, pool.getNodesInUse());
+            continue;
+        };
+        view.deinit();
+        try std.testing.expectEqual(baseline, pool.getNodesInUse());
+    }
+}
+
+test "TreeView container nested types set/get/commit" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 2048 });
+    defer pool.deinit();
+
+    const Uint16 = UintType(16);
+    const Uint32 = UintType(32);
+    const Uint64 = UintType(64);
+
+    const Bytes = ByteListType(16);
+    const BasicVec = FixedVectorType(Uint16, 4, .{});
+
+    const InnerFixed = FixedContainerType(struct {
+        a: Uint32,
+        b: ByteVectorType(4),
+    });
+    const CompVec = FixedVectorType(InnerFixed, 2, .{});
+
+    const InnerVar = VariableContainerType(struct {
+        id: Uint32,
+        payload: ByteListType(8),
+    });
+    const CompList = VariableListType(InnerVar, 4);
+
+    const Outer = VariableContainerType(struct {
+        n: Uint64,
+        bytes: Bytes,
+        basic_vec: BasicVec,
+        comp_vec: CompVec,
+        comp_list: CompList,
+    });
+
+    var outer_value: Outer.Type = Outer.default_value;
+    defer Outer.deinit(allocator, &outer_value);
+
+    const root = try Outer.tree.fromValue(&pool, &outer_value);
+    var view = try Outer.TreeView.init(allocator, &pool, root);
+    defer view.deinit();
+
+    try std.testing.expectEqual(@as(u64, 0), try view.get("n"));
+    try view.set("n", @as(u64, 7));
+    try std.testing.expectEqual(@as(u64, 7), try view.get("n"));
+
+    {
+        var bytes_value: Bytes.Type = Bytes.default_value;
+        defer bytes_value.deinit(allocator);
+        const bytes_root = try Bytes.tree.fromValue(&pool, &bytes_value);
+        var bytes_view = try Bytes.TreeView.init(allocator, &pool, bytes_root);
+
+        try bytes_view.push(@as(u8, 0xAA));
+        try bytes_view.push(@as(u8, 0xBB));
+        try bytes_view.set(1, @as(u8, 0xCC));
+
+        const all = try bytes_view.getAll(null);
+        defer allocator.free(all);
+        try std.testing.expectEqualSlices(u8, &[_]u8{ 0xAA, 0xCC }, all);
+
+        try view.set("bytes", bytes_view);
+    }
+
+    {
+        const basic_vec_value: BasicVec.Type = [_]u16{ 0, 0, 0, 0 };
+        const basic_vec_root = try BasicVec.tree.fromValue(&pool, &basic_vec_value);
+        var basic_vec_view = try BasicVec.TreeView.init(allocator, &pool, basic_vec_root);
+
+        try std.testing.expectEqual(@as(u16, 0), try basic_vec_view.get(0));
+        try basic_vec_view.set(0, @as(u16, 1));
+        try basic_vec_view.set(3, @as(u16, 4));
+
+        const all = try basic_vec_view.getAll(allocator);
+        defer allocator.free(all);
+        try std.testing.expectEqual(@as(usize, 4), all.len);
+        try std.testing.expectEqual(@as(u16, 1), all[0]);
+        try std.testing.expectEqual(@as(u16, 0), all[1]);
+        try std.testing.expectEqual(@as(u16, 0), all[2]);
+        try std.testing.expectEqual(@as(u16, 4), all[3]);
+
+        try view.set("basic_vec", basic_vec_view);
+    }
+
+    {
+        const comp_vec_value: CompVec.Type = .{ InnerFixed.default_value, InnerFixed.default_value };
+        const comp_vec_root = try CompVec.tree.fromValue(&pool, &comp_vec_value);
+        var comp_vec_view = try CompVec.TreeView.init(allocator, &pool, comp_vec_root);
+
+        const e0: InnerFixed.Type = .{ .a = 11, .b = [_]u8{ 1, 2, 3, 4 } };
+        const e0_root = try InnerFixed.tree.fromValue(&pool, &e0);
+        var e0_view: ?*InnerFixed.TreeView = try InnerFixed.TreeView.init(allocator, &pool, e0_root);
+        defer if (e0_view) |v| v.deinit();
+        try comp_vec_view.set(0, e0_view.?);
+        e0_view = null;
+
+        const e1: InnerFixed.Type = .{ .a = 22, .b = [_]u8{ 4, 3, 2, 1 } };
+        const e1_root = try InnerFixed.tree.fromValue(&pool, &e1);
+        var e1_view: ?*InnerFixed.TreeView = try InnerFixed.TreeView.init(allocator, &pool, e1_root);
+        defer if (e1_view) |v| v.deinit();
+        try comp_vec_view.set(1, e1_view.?);
+        e1_view = null;
+
+        try view.set("comp_vec", comp_vec_view);
+    }
+
+    {
+        var comp_list_value: CompList.Type = .empty;
+        defer CompList.deinit(allocator, &comp_list_value);
+        const comp_list_root = try CompList.tree.fromValue(&pool, &comp_list_value);
+        var comp_list_view = try CompList.TreeView.init(allocator, &pool, comp_list_root);
+
+        var inner_value: InnerVar.Type = InnerVar.default_value;
+        defer InnerVar.deinit(allocator, &inner_value);
+        const inner_root = try InnerVar.tree.fromValue(&pool, &inner_value);
+        var inner_view: ?*InnerVar.TreeView = try InnerVar.TreeView.init(allocator, &pool, inner_root);
+        defer if (inner_view) |v| v.deinit();
+        const inner = inner_view.?;
+
+        try inner.set("id", @as(u32, 99));
+
+        const payload_value_ssz_type = @typeInfo(InnerVar.TreeView.Field("payload")).pointer.child.SszType;
+        var payload_value = payload_value_ssz_type.default_value;
+        defer payload_value.deinit(allocator);
+        const payload_root = try payload_value_ssz_type.tree.fromValue(&pool, &payload_value);
+        var payload_view = try payload_value_ssz_type.TreeView.init(allocator, &pool, payload_root);
+
+        try payload_view.push(@as(u8, 0x5A));
+        try inner.set("payload", payload_view);
+
+        try comp_list_view.push(inner_view.?);
+        inner_view = null;
+
+        try view.set("comp_list", comp_list_view);
+    }
+
+    try view.commit();
+
+    var roundtrip: Outer.Type = Outer.default_value;
+    defer Outer.deinit(allocator, &roundtrip);
+    try Outer.tree.toValue(allocator, view.getRoot(), &pool, &roundtrip);
+
+    try std.testing.expectEqual(@as(u64, 7), roundtrip.n);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0xAA, 0xCC }, roundtrip.bytes.items);
+    try std.testing.expectEqualSlices(u16, &[_]u16{ 1, 0, 0, 4 }, roundtrip.basic_vec[0..]);
+    try std.testing.expectEqual(@as(u32, 11), roundtrip.comp_vec[0].a);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4 }, roundtrip.comp_vec[0].b[0..]);
+    try std.testing.expectEqual(@as(u32, 22), roundtrip.comp_vec[1].a);
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 4, 3, 2, 1 }, roundtrip.comp_vec[1].b[0..]);
+    try std.testing.expectEqual(@as(usize, 1), roundtrip.comp_list.items.len);
+    try std.testing.expectEqual(@as(u32, 99), roundtrip.comp_list.items[0].id);
+    try std.testing.expectEqualSlices(u8, &[_]u8{0x5A}, roundtrip.comp_list.items[0].payload.items);
+}
+
+test "TreeView container clone isolates updates" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const Uint64 = UintType(64);
+    const C = FixedContainerType(struct {
+        n: Uint64,
+    });
+
+    const value: C.Type = .{ .n = 1 };
+    const root = try C.tree.fromValue(&pool, &value);
+
+    var v1 = try C.TreeView.init(allocator, &pool, root);
+    defer v1.deinit();
+
+    var v2 = try v1.clone(.{});
+    defer v2.deinit();
+
+    try v2.set("n", @as(u64, 99));
+    try v2.commit();
+
+    try std.testing.expectEqual(@as(u64, 1), try v1.get("n"));
+    try std.testing.expectEqual(@as(u64, 99), try v2.get("n"));
+}
+
+test "TreeView container clone drops uncommitted changes" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const Uint64 = UintType(64);
+    const C = FixedContainerType(struct {
+        n: Uint64,
+    });
+
+    const value: C.Type = .{ .n = 1 };
+    const root = try C.tree.fromValue(&pool, &value);
+
+    var v = try C.TreeView.init(allocator, &pool, root);
+    defer v.deinit();
+
+    try v.set("n", @as(u64, 7));
+    try std.testing.expectEqual(@as(u64, 7), try v.get("n"));
+
+    var dropped = try v.clone(.{});
+    defer dropped.deinit();
+
+    try std.testing.expectEqual(@as(u64, 1), try v.get("n"));
+    try std.testing.expectEqual(@as(u64, 1), try dropped.get("n"));
+}
+
+test "TreeView container clone(false) does not transfer cache" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const Uint64 = UintType(64);
+    const C = FixedContainerType(struct {
+        n: Uint64,
+    });
+
+    const value: C.Type = .{ .n = 1 };
+    const root = try C.tree.fromValue(&pool, &value);
+
+    var v = try C.TreeView.init(allocator, &pool, root);
+    defer v.deinit();
+
+    _ = try v.get("n");
+    try std.testing.expect(v.child_data[0] != null);
+
+    var cloned_no_cache = try v.clone(.{ .transfer_cache = false });
+    defer cloned_no_cache.deinit();
+
+    try std.testing.expect(v.child_data[0] != null);
+    try std.testing.expect(cloned_no_cache.child_data[0] == null);
+}
+
+test "TreeView container clone(true) transfers cache and clears source" {
+    const allocator = std.testing.allocator;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const Uint64 = UintType(64);
+    const C = FixedContainerType(struct {
+        n: Uint64,
+    });
+
+    const value: C.Type = .{ .n = 1 };
+    const root = try C.tree.fromValue(&pool, &value);
+
+    var v = try C.TreeView.init(allocator, &pool, root);
+    defer v.deinit();
+
+    _ = try v.get("n");
+    try std.testing.expect(v.child_data[0] != null);
+
+    var cloned = try v.clone(.{});
+    defer cloned.deinit();
+
+    try std.testing.expect(v.child_data[0] == null);
+    try std.testing.expect(cloned.child_data[0] != null);
+}
+
+// Tests ported from TypeScript ssz packages/ssz/test/unit/byType/container/tree.test.ts
+test "ContainerTreeView - serialize (basic fields)" {
+    const allocator = std.testing.allocator;
+
+    const Uint64 = UintType(64);
+    const TestContainer = FixedContainerType(struct {
+        a: UintType(64),
+        b: UintType(64),
+    });
+    _ = Uint64;
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const TestCase = struct {
+        id: []const u8,
+        a: u64,
+        b: u64,
+        expected_serialized: []const u8,
+        expected_root: [32]u8,
+    };
+
+    const test_cases = [_]TestCase{
+        .{
+            .id = "zero",
+            .a = 0,
+            .b = 0,
+            // 0x00000000000000000000000000000000
+            .expected_serialized = &[_]u8{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+            // 0xf5a5fd42d16a20302798ef6ed309979b43003d2320d9f0e8ea9831a92759fb4b
+            .expected_root = [_]u8{ 0xf5, 0xa5, 0xfd, 0x42, 0xd1, 0x6a, 0x20, 0x30, 0x27, 0x98, 0xef, 0x6e, 0xd3, 0x09, 0x97, 0x9b, 0x43, 0x00, 0x3d, 0x23, 0x20, 0xd9, 0xf0, 0xe8, 0xea, 0x98, 0x31, 0xa9, 0x27, 0x59, 0xfb, 0x4b },
+        },
+        .{
+            .id = "some value",
+            .a = 123456,
+            .b = 654321,
+            // 0x40e2010000000000f1fb090000000000
+            .expected_serialized = &[_]u8{ 0x40, 0xe2, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf1, 0xfb, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00 },
+            // 0x53b38aff7bf2dd1a49903d07a33509b980c6acc9f2235a45aac342b0a9528c22
+            .expected_root = [_]u8{ 0x53, 0xb3, 0x8a, 0xff, 0x7b, 0xf2, 0xdd, 0x1a, 0x49, 0x90, 0x3d, 0x07, 0xa3, 0x35, 0x09, 0xb9, 0x80, 0xc6, 0xac, 0xc9, 0xf2, 0x23, 0x5a, 0x45, 0xaa, 0xc3, 0x42, 0xb0, 0xa9, 0x52, 0x8c, 0x22 },
+        },
+    };
+
+    for (test_cases) |tc| {
+        const value: TestContainer.Type = .{ .a = tc.a, .b = tc.b };
+
+        var value_serialized: [TestContainer.fixed_size]u8 = undefined;
+        _ = TestContainer.serializeIntoBytes(&value, &value_serialized);
+
+        const tree_node = try TestContainer.tree.fromValue(&pool, &value);
+        var view = try TestContainer.TreeView.init(allocator, &pool, tree_node);
+        defer view.deinit();
+
+        var view_serialized: [TestContainer.fixed_size]u8 = undefined;
+        const written = try view.serializeIntoBytes(&view_serialized);
+        try std.testing.expectEqual(view_serialized.len, written);
+
+        try std.testing.expectEqualSlices(u8, tc.expected_serialized, &view_serialized);
+        try std.testing.expectEqualSlices(u8, &value_serialized, &view_serialized);
+
+        const view_size = try view.serializedSize();
+        try std.testing.expectEqual(tc.expected_serialized.len, view_size);
+
+        var hash_root: [32]u8 = undefined;
+        try view.hashTreeRootInto(&hash_root);
+        try std.testing.expectEqualSlices(u8, &tc.expected_root, &hash_root);
+    }
+}
+
+test "ContainerTreeView - get and set basic fields" {
+    const allocator = std.testing.allocator;
+
+    const Uint64 = UintType(64);
+    const TestContainer = FixedContainerType(struct {
+        a: UintType(64),
+        b: UintType(64),
+    });
+    _ = Uint64;
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    const value: TestContainer.Type = .{ .a = 100, .b = 200 };
+    const tree_node = try TestContainer.tree.fromValue(&pool, &value);
+    var view = try TestContainer.TreeView.init(allocator, &pool, tree_node);
+    defer view.deinit();
+
+    try std.testing.expectEqual(@as(u64, 100), try view.get("a"));
+    try std.testing.expectEqual(@as(u64, 200), try view.get("b"));
+
+    try view.set("a", 999);
+    try std.testing.expectEqual(@as(u64, 999), try view.get("a"));
+
+    var serialized: [TestContainer.fixed_size]u8 = undefined;
+    const written = try view.serializeIntoBytes(&serialized);
+    try std.testing.expectEqual(serialized.len, written);
+
+    const expected: TestContainer.Type = .{ .a = 999, .b = 200 };
+    var expected_serialized: [TestContainer.fixed_size]u8 = undefined;
+    _ = TestContainer.serializeIntoBytes(&expected, &expected_serialized);
+    try std.testing.expectEqualSlices(u8, &expected_serialized, &serialized);
+}
+
+test "ContainerTreeView - serialize (with nested list)" {
+    const allocator = std.testing.allocator;
+
+    const Uint64 = UintType(64);
+    const ListU64 = FixedListType(Uint64, 128, .{});
+    const TestContainer = VariableContainerType(struct {
+        a: FixedListType(UintType(64), 128, .{}),
+        b: UintType(64),
+    });
+    _ = ListU64;
+
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = 1024 });
+    defer pool.deinit();
+
+    var value: TestContainer.Type = .{
+        .a = FixedListType(UintType(64), 128, .{}).default_value,
+        .b = 0,
+    };
+    defer TestContainer.deinit(allocator, &value);
+
+    const value_serialized = try allocator.alloc(u8, TestContainer.serializedSize(&value));
+    defer allocator.free(value_serialized);
+    _ = TestContainer.serializeIntoBytes(&value, value_serialized);
+
+    const tree_node = try TestContainer.tree.fromValue(&pool, &value);
+    var view = try TestContainer.TreeView.init(allocator, &pool, tree_node);
+    defer view.deinit();
+
+    const view_size = try view.serializedSize();
+    const view_serialized = try allocator.alloc(u8, view_size);
+    defer allocator.free(view_serialized);
+    const written = try view.serializeIntoBytes(view_serialized);
+    try std.testing.expectEqual(view_size, written);
+
+    // Expected: offset (4 bytes) + b (8 bytes) + empty list data (0 bytes)
+    // 0x0c0000000000000000000000
+    const expected_serialized = [_]u8{ 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    try std.testing.expectEqualSlices(u8, &expected_serialized, view_serialized);
+    try std.testing.expectEqualSlices(u8, value_serialized, view_serialized);
+
+    var hash_root: [32]u8 = undefined;
+    try view.hashTreeRootInto(&hash_root);
+    // 0xdc3619cbbc5ef0e0a3b38e3ca5d31c2b16868eacb6e4bcf8b4510963354315f5
+    const expected_root = [_]u8{ 0xdc, 0x36, 0x19, 0xcb, 0xbc, 0x5e, 0xf0, 0xe0, 0xa3, 0xb3, 0x8e, 0x3c, 0xa5, 0xd3, 0x1c, 0x2b, 0x16, 0x86, 0x8e, 0xac, 0xb6, 0xe4, 0xbc, 0xf8, 0xb4, 0x51, 0x09, 0x63, 0x35, 0x43, 0x15, 0xf5 };
+    try std.testing.expectEqualSlices(u8, &expected_root, &hash_root);
+}

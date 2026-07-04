@@ -1,38 +1,40 @@
 const std = @import("std");
-const ssz = @import("consensus_types");
+const Node = @import("persistent_merkle_tree").Node;
 const ForkSeq = @import("config").ForkSeq;
-const Preset = @import("preset").Preset;
 const state_transition = @import("state_transition");
-const TestCachedBeaconStateAllForks = state_transition.test_utils.TestCachedBeaconStateAllForks;
-const SignedBeaconBlock = state_transition.SignedBeaconBlock;
-const BeaconStateAllForks = state_transition.BeaconStateAllForks;
-const CachedBeaconStateAllForks = state_transition.CachedBeaconStateAllForks;
+const TestCachedBeaconState = state_transition.test_utils.TestCachedBeaconState;
+const AnySignedBeaconBlock = @import("fork_types").AnySignedBeaconBlock;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
 const test_case = @import("../test_case.zig");
-const loadSszValue = test_case.loadSszSnappyValue;
 const expectEqualBeaconStates = test_case.expectEqualBeaconStates;
 const TestCaseUtils = test_case.TestCaseUtils;
 const loadSignedBeaconBlock = test_case.loadSignedBeaconBlock;
+const active_preset = @import("preset").active_preset;
 
 pub fn Transition(comptime fork: ForkSeq) type {
     const tc_utils = TestCaseUtils(fork);
 
     return struct {
-        pre: TestCachedBeaconStateAllForks,
-        post: ?BeaconStateAllForks,
-        blocks: []SignedBeaconBlock,
+        pre: TestCachedBeaconState,
+        post: ?*AnyBeaconState,
+        blocks: []AnySignedBeaconBlock,
 
         const Self = @This();
 
-        pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
+        pub fn execute(allocator: std.mem.Allocator, dir: std.Io.Dir) !void {
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
             defer {
                 tc.deinit();
-                state_transition.deinitStateTransition();
+                state_transition.deinitStateTransition(std.testing.io);
             }
             try tc.runTest();
         }
 
-        pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir) !Self {
+        pub fn init(allocator: std.mem.Allocator, pool: *Node.Pool, dir: std.Io.Dir) !Self {
             var tc = Self{
                 .pre = undefined,
                 .post = undefined,
@@ -40,9 +42,7 @@ pub fn Transition(comptime fork: ForkSeq) type {
             };
 
             // Load meta.yaml for blocks_count
-            var meta_file = try dir.openFile("meta.yaml", .{});
-            defer meta_file.close();
-            const meta_content = try meta_file.readToEndAlloc(allocator, 1024);
+            const meta_content = try dir.readFileAlloc(std.testing.io, "meta.yaml", allocator, .unlimited);
             defer allocator.free(meta_content);
             const meta_content_one_line = std.mem.trim(u8, meta_content, " \n");
             // sample content of meta.yaml: {post_fork: electra, fork_epoch: 2, blocks_count: 96, fork_block: 62}
@@ -74,7 +74,7 @@ pub fn Transition(comptime fork: ForkSeq) type {
             } else null;
 
             // load blocks
-            tc.blocks = try allocator.alloc(SignedBeaconBlock, blocks_count);
+            tc.blocks = try allocator.alloc(AnySignedBeaconBlock, blocks_count);
             errdefer {
                 for (tc.blocks) |block| {
                     test_case.deinitSignedBeaconBlock(block, allocator);
@@ -91,11 +91,11 @@ pub fn Transition(comptime fork: ForkSeq) type {
             }
 
             // load pre state
-            tc.pre = try tc_utils.loadPreStatePreFork(allocator, dir, fork_epoch);
+            tc.pre = try tc_utils.loadPreStatePreFork(allocator, pool, dir, fork_epoch);
             errdefer tc.pre.deinit();
 
             // load post state
-            tc.post = try tc_utils.loadPostState(allocator, dir);
+            tc.post = try tc_utils.loadPostState(allocator, pool, dir);
 
             return tc;
         }
@@ -106,46 +106,43 @@ pub fn Transition(comptime fork: ForkSeq) type {
             }
             self.pre.allocator.free(self.blocks);
             self.pre.deinit();
-            if (self.post) |*post| {
-                post.deinit(self.pre.allocator);
+            if (self.post) |post| {
+                post.deinit();
+                self.pre.allocator.destroy(post);
             }
         }
 
-        pub fn process(self: *Self) !*CachedBeaconStateAllForks {
-            var post_state: *CachedBeaconStateAllForks = self.pre.cached_state;
-            for (self.blocks, 0..) |beacon_block, i| {
+        pub fn process(self: *Self) !*state_transition.CachedBeaconState {
+            var result: ?*state_transition.CachedBeaconState = null;
+            for (self.blocks) |beacon_block| {
+                const input_cached_state = if (result) |res| res else self.pre.cached_state;
                 // if error, clean pre_state of stateTransition() function
                 errdefer {
-                    if (i > 0) {
-                        post_state.deinit();
-                        self.pre.allocator.destroy(post_state);
+                    if (result) |res| {
+                        res.deinit();
+                        self.pre.allocator.destroy(res);
                     }
                 }
-                const new_post_state = try state_transition.state_transition.stateTransition(
+                const new_result = try state_transition.state_transition.stateTransition(
                     self.pre.allocator,
-                    post_state,
-                    .{
-                        .regular = beacon_block,
-                    },
+                    std.testing.io,
+                    input_cached_state,
+                    beacon_block,
                     .{
                         .verify_state_root = true,
-                        .verify_proposer = false,
-                        .verify_signatures = false,
+                        .verify_proposer = true,
+                        .verify_signatures = true,
                     },
                 );
 
-                // don't deinit the initial pre state, we do it in deinit()
-                const to_destroy = post_state;
-                post_state = new_post_state;
-
-                // clean post_state of stateTransition() function
-                if (i > 0) {
-                    to_destroy.deinit();
-                    self.pre.allocator.destroy(to_destroy);
+                if (result) |res| {
+                    res.deinit();
+                    self.pre.allocator.destroy(res);
                 }
+                result = new_result;
             }
 
-            return post_state;
+            return result orelse error.NoBlocks;
         }
 
         pub fn runTest(self: *Self) !void {
@@ -155,7 +152,7 @@ pub fn Transition(comptime fork: ForkSeq) type {
                     actual.deinit();
                     self.pre.allocator.destroy(actual);
                 }
-                try expectEqualBeaconStates(post, actual.state.*);
+                try expectEqualBeaconStates(post, actual.state);
             } else {
                 _ = self.process() catch |err| {
                     if (err == error.SkipZigTest) {

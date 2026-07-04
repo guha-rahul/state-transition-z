@@ -2,72 +2,119 @@ const std = @import("std");
 const types = @import("consensus_types");
 const Allocator = std.mem.Allocator;
 const BeaconConfig = @import("config").BeaconConfig;
-const TestCachedBeaconStateAllForks = @import("../test_utils/root.zig").TestCachedBeaconStateAllForks;
-const EpochCacheRc = @import("./epoch_cache.zig").EpochCacheRc;
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
 const EpochCache = @import("./epoch_cache.zig").EpochCache;
 const EpochCacheImmutableData = @import("./epoch_cache.zig").EpochCacheImmutableData;
 const EpochCacheOpts = @import("./epoch_cache.zig").EpochCacheOpts;
-const BeaconStateAllForks = @import("../types/beacon_state.zig").BeaconStateAllForks;
+const AnyBeaconState = @import("fork_types").AnyBeaconState;
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 const PubkeyIndexMap = @import("pubkey_cache.zig").PubkeyIndexMap(ValidatorIndex);
 const Index2PubkeyCache = @import("pubkey_cache.zig").Index2PubkeyCache;
+const CloneOpts = @import("ssz").CloneOpts;
+const SlashingsCache = @import("./slashings_cache.zig").SlashingsCache;
+const Node = @import("persistent_merkle_tree").Node;
 
-pub const CachedBeaconStateAllForks = struct {
+pub const ProposerRewards = struct {
+    attestations: u64 = 0,
+    sync_aggregate: u64 = 0,
+    slashing: u64 = 0,
+};
+
+pub const CachedBeaconState = struct {
     allocator: Allocator,
     /// only a reference to the singleton BeaconConfig
     config: *const BeaconConfig,
-    /// only a reference to the shared EpochCache instance
-    /// TODO: before an epoch transition, need to release() epoch_cache before using a new one
-    epoch_cache_ref: *EpochCacheRc,
+    /// Owns an independent EpochCache (shallow clone). Inner Rc elements are shared.
+    epoch_cache: *EpochCache,
+    slashings_cache: SlashingsCache,
     /// this takes ownership of the state, it is expected to be deinitialized by this struct
-    state: *BeaconStateAllForks,
+    state: *AnyBeaconState,
+    /// Proposer rewards accumulated during block processing
+    proposer_rewards: ProposerRewards,
 
-    // TODO: cloned_count properties, implement this once we switch to TreeView
-    // TODO: proposer_rewards, looks like this is not a great place to put in, it's a result of a block state transition instead
+    cloned_count: u32 = 0,
+    cloned_count_with_transfer_cache: u32 = 0,
+    created_with_transfer_cache: bool = false,
 
     /// This class takes ownership of state after this function and has responsibility to deinit it
-    pub fn createCachedBeaconState(allocator: Allocator, state: *BeaconStateAllForks, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !*CachedBeaconStateAllForks {
-        const epoch_cache = try EpochCache.createFromState(allocator, state, immutable_data, option);
-        errdefer epoch_cache.deinit();
-        const epoch_cache_ref = try EpochCacheRc.init(allocator, epoch_cache);
-        errdefer epoch_cache_ref.release();
-        const cached_state = try allocator.create(CachedBeaconStateAllForks);
+    pub fn createCachedBeaconState(allocator: Allocator, state: *AnyBeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !*CachedBeaconState {
+        const cached_state = try allocator.create(CachedBeaconState);
         errdefer allocator.destroy(cached_state);
-        cached_state.* = .{
-            .allocator = allocator,
-            .config = immutable_data.config,
-            .epoch_cache_ref = epoch_cache_ref,
-            .state = state,
-        };
+
+        try cached_state.init(allocator, state, immutable_data, option);
 
         return cached_state;
     }
 
-    // TODO: do we need another getConst()?
-    pub fn getEpochCache(self: *const CachedBeaconStateAllForks) *EpochCache {
-        return self.epoch_cache_ref.get();
+    pub fn init(self: *CachedBeaconState, allocator: Allocator, state: *AnyBeaconState, immutable_data: EpochCacheImmutableData, option: ?EpochCacheOpts) !void {
+        const epoch_cache = try EpochCache.createFromState(allocator, state, immutable_data, option);
+        errdefer epoch_cache.deinit();
+        self.* = .{
+            .allocator = allocator,
+            .config = immutable_data.config,
+            .epoch_cache = epoch_cache,
+            .slashings_cache = try SlashingsCache.initEmpty(allocator),
+            .state = state,
+            .proposer_rewards = .{},
+        };
     }
 
-    pub fn clone(self: *CachedBeaconStateAllForks, allocator: Allocator) !*CachedBeaconStateAllForks {
-        const cached_state = try allocator.create(CachedBeaconStateAllForks);
+    /// Get the proposer rewards for the state.
+    pub fn getProposerRewards(self: *const CachedBeaconState) ProposerRewards {
+        return self.proposer_rewards;
+    }
+
+    pub fn clone(self: *CachedBeaconState, allocator: Allocator, opts: CloneOpts) !*CachedBeaconState {
+        const cached_state = try allocator.create(CachedBeaconState);
         errdefer allocator.destroy(cached_state);
-        const epoch_cache_ref = self.epoch_cache_ref.acquire();
-        errdefer epoch_cache_ref.release();
+        const cloned_epoch_cache = try self.epoch_cache.clone(allocator);
+        errdefer cloned_epoch_cache.deinit();
+
+        var slashings_cache = try self.slashings_cache.clone(allocator);
+        errdefer slashings_cache.deinit();
+
+        const state = try allocator.create(AnyBeaconState);
+        errdefer allocator.destroy(state);
+        state.* = try self.state.clone(opts);
 
         cached_state.* = .{
             .allocator = allocator,
             .config = self.config,
-            .epoch_cache_ref = epoch_cache_ref,
-            .state = try self.state.clone(allocator),
+            .epoch_cache = cloned_epoch_cache,
+            .slashings_cache = slashings_cache,
+            .state = state,
+            .proposer_rewards = self.proposer_rewards,
+            .created_with_transfer_cache = opts.transfer_cache,
         };
+
+        self.cloned_count += 1;
+        if (opts.transfer_cache) {
+            self.cloned_count_with_transfer_cache += 1;
+        }
+
         return cached_state;
     }
 
-    pub fn deinit(self: *CachedBeaconStateAllForks) void {
+    pub fn deinit(self: *CachedBeaconState) void {
         // should not deinit config since we don't take ownership of it, it's singleton across applications
-        self.epoch_cache_ref.release();
-        self.state.deinit(self.allocator);
+        self.epoch_cache.deinit();
+        self.slashings_cache.deinit();
+        self.state.deinit();
         self.allocator.destroy(self.state);
+    }
+
+    pub fn isSlashed(self: *const CachedBeaconState, index: ValidatorIndex) bool {
+        return self.slashings_cache.isSlashed(index);
+    }
+
+    pub fn recordValidatorSlashing(self: *CachedBeaconState, block_slot: types.primitive.Slot.Type, index: ValidatorIndex) !void {
+        try self.slashings_cache.recordValidatorSlashing(block_slot, index);
+    }
+
+    pub fn updateSlashingsCacheLatestBlockSlot(self: *CachedBeaconState) !void {
+        var latest_block_header = try self.state.latestBlockHeader();
+        const latest_block_slot = try latest_block_header.get("slot");
+        self.slashings_cache.updateLatestBlockSlot(latest_block_slot);
     }
 
     // TODO: implement loadCachedBeaconState
@@ -75,19 +122,19 @@ pub const CachedBeaconStateAllForks = struct {
     // need to do this once we switch to TreeView
 
     // TODO: implement getCachedBeaconState
-    // this is used to create a CachedBeaconStateAllForks based on a tree and an exising CachedBeaconStateAllForks at fork transition
+    // this is used to create a CachedBeaconState based on a tree and an exising CachedBeaconState at fork transition
     // implement this once we switch to TreeView
 
     /// Gets the beacon proposer index for a given slot.
     /// For the Fulu fork, this uses `proposer_lookahead` from the state.
     /// For earlier forks, this uses `EpochCache.getBeaconProposer()`.
-    pub fn getBeaconProposer(self: *const CachedBeaconStateAllForks, slot: types.primitive.Slot.Type) !ValidatorIndex {
+    pub fn getBeaconProposer(self: *const CachedBeaconState, slot: types.primitive.Slot.Type) !ValidatorIndex {
         const preset_import = @import("preset").preset;
         const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
 
         // For Fulu, use proposer_lookahead from state
-        if (self.state.isFulu()) {
-            const current_epoch = computeEpochAtSlot(self.state.slot());
+        if (self.state.forkSeq().gte(.fulu)) {
+            const current_epoch = computeEpochAtSlot(try self.state.slot());
             const slot_epoch = computeEpochAtSlot(slot);
 
             // proposer_lookahead covers current_epoch through current_epoch + MIN_SEED_LOOKAHEAD
@@ -98,25 +145,76 @@ pub const CachedBeaconStateAllForks = struct {
                 return error.SlotOutsideProposerLookahead;
             }
 
-            const proposer_lookahead = self.state.proposerLookahead();
+            var proposer_lookahead = try self.state.proposerLookahead();
             const epoch_offset = slot_epoch - lookahead_start_epoch;
             const slot_in_epoch = slot % preset_import.SLOTS_PER_EPOCH;
             const index = epoch_offset * preset_import.SLOTS_PER_EPOCH + slot_in_epoch;
 
-            return proposer_lookahead[index];
+            return try proposer_lookahead.get(index);
         }
-        return self.getEpochCache().getBeaconProposer(slot);
+        return self.epoch_cache.getBeaconProposer(slot);
+    }
+
+    /// Get the previous decision root for the state from the epoch cache.
+    pub fn previousDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.epoch_cache.previous_decision_root;
+    }
+
+    /// Get the current decision root for the state from the epoch cache.
+    pub fn currentDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.epoch_cache.current_decision_root;
+    }
+
+    /// Get the next decision root for the state from the epoch cache.
+    pub fn nextDecisionRoot(self: *CachedBeaconState) [32]u8 {
+        return self.epoch_cache.next_decision_root;
     }
 };
 
-test "CachedBeaconStateAllForks.clone()" {
+test "CachedBeaconState.clone()" {
     const allocator = std.testing.allocator;
-    var test_state = try TestCachedBeaconStateAllForks.init(allocator, 256);
+    const pool_size = 256 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
     defer test_state.deinit();
     // test clone() api works fine with no memory leak
-    const cloned_cached_state = try test_state.cached_state.clone(allocator);
+    const cloned_cached_state = try test_state.cached_state.clone(allocator, .{});
     defer {
         cloned_cached_state.deinit();
         allocator.destroy(cloned_cached_state);
     }
+}
+
+test "CachedBeaconState.clone() epoch cache isolation" {
+    const allocator = std.testing.allocator;
+    const pool_size = 256 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
+    defer test_state.deinit();
+
+    const original = test_state.cached_state;
+    const cloned = try original.clone(allocator, .{});
+    defer {
+        cloned.deinit();
+        allocator.destroy(cloned);
+    }
+
+    // Capture original values
+    const orig_exit_queue_churn = original.epoch_cache.exit_queue_churn;
+    const orig_total_slashings = original.epoch_cache.total_slashings_by_increment;
+    const orig_current_target = original.epoch_cache.current_target_unslashed_balance_increments;
+
+    // Mutate the clone's epoch cache
+    cloned.epoch_cache.exit_queue_churn += 99;
+    cloned.epoch_cache.total_slashings_by_increment += 42;
+    cloned.epoch_cache.current_target_unslashed_balance_increments += 7;
+
+    // Assert the original is unaffected
+    try std.testing.expectEqual(orig_exit_queue_churn, original.epoch_cache.exit_queue_churn);
+    try std.testing.expectEqual(orig_total_slashings, original.epoch_cache.total_slashings_by_increment);
+    try std.testing.expectEqual(orig_current_target, original.epoch_cache.current_target_unslashed_balance_increments);
 }

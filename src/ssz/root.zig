@@ -34,6 +34,7 @@ pub const FixedVectorType = types.FixedVectorType;
 pub const VariableVectorType = types.VariableVectorType;
 
 pub const FixedContainerType = types.FixedContainerType;
+pub const StructContainerType = types.StructContainerType;
 pub const VariableContainerType = types.VariableContainerType;
 
 // Progressive container types
@@ -57,8 +58,14 @@ const hasher = @import("hasher.zig");
 pub const Hasher = hasher.Hasher;
 pub const HasherData = hasher.HasherData;
 
-const tree_view = @import("tree_view.zig");
-pub const TreeView = tree_view.TreeView;
+const tree_view = @import("tree_view/root.zig");
+pub const ContainerTreeView = tree_view.ContainerTreeView;
+pub const StructContainerTreeView = tree_view.StructContainerTreeView;
+pub const ArrayBasicTreeView = tree_view.ArrayBasicTreeView;
+pub const ArrayCompositeTreeView = tree_view.ArrayCompositeTreeView;
+pub const ListBasicTreeView = tree_view.ListBasicTreeView;
+pub const ListCompositeTreeView = tree_view.ListCompositeTreeView;
+pub const CloneOpts = @import("tree_view/utils/clone_opts.zig").CloneOpts;
 
 test {
     testing.refAllDecls(@This());

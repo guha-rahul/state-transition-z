@@ -3,30 +3,28 @@ const Allocator = std.mem.Allocator;
 const Domain = types.primitive.Domain.Type;
 const Root = types.primitive.Root.Type;
 const types = @import("consensus_types");
-const BeaconBlock = @import("../types/beacon_block.zig").BeaconBlock;
-const SignedBeaconBlock = @import("../state_transition.zig").SignedBeaconBlock;
-const Block = @import("../types/block.zig").Block;
+const AnyBeaconBlock = @import("fork_types").AnyBeaconBlock;
 
 const SigningData = types.phase0.SigningData.Type;
 
 /// Return the signing root of an object by calculating the root of the object-domain tree.
-pub fn computeSigningRoot(comptime T: type, ssz_object: *const T.Type, domain: Domain, out: *[32]u8) !void {
+pub fn computeSigningRoot(comptime T: type, ssz_object: *const T.Type, domain: *const Domain, out: *[32]u8) !void {
     var object_root: Root = undefined;
     try T.hashTreeRoot(ssz_object, &object_root);
     const domain_wrapped_object: SigningData = .{
         .object_root = object_root,
-        .domain = domain,
+        .domain = domain.*,
     };
 
     try types.phase0.SigningData.hashTreeRoot(&domain_wrapped_object, out);
 }
 
-pub fn computeBlockSigningRoot(allocator: Allocator, block: Block, domain: Domain, out: *[32]u8) !void {
+pub fn computeBlockSigningRoot(allocator: Allocator, block: AnyBeaconBlock, domain: *const Domain, out: *[32]u8) !void {
     var object_root: Root = undefined;
     try block.hashTreeRoot(allocator, &object_root);
     const domain_wrapped_object: SigningData = .{
         .object_root = object_root,
-        .domain = domain,
+        .domain = domain.*,
     };
     try types.phase0.SigningData.hashTreeRoot(&domain_wrapped_object, out);
 }
@@ -40,7 +38,7 @@ test "computeSigningRoot - sanity" {
 
     const domain = [_]u8{0x01} ** 32;
     var out: [32]u8 = undefined;
-    try computeSigningRoot(ssz_type, &ssz_object, domain, &out);
+    try computeSigningRoot(ssz_type, &ssz_object, &domain, &out);
 }
 
 test "computeBlockSigningRoot - sanity" {
@@ -50,7 +48,6 @@ test "computeBlockSigningRoot - sanity" {
     const domain = [_]u8{0x01} ** 32;
     var out: [32]u8 = undefined;
 
-    const beacon_block = BeaconBlock{ .electra = &electra_block };
-    const block = Block{ .regular = beacon_block };
-    try computeBlockSigningRoot(allocator, block, domain, &out);
+    const beacon_block = AnyBeaconBlock{ .full_electra = &electra_block };
+    try computeBlockSigningRoot(allocator, beacon_block, &domain, &out);
 }

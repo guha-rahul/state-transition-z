@@ -1,4 +1,3 @@
-const std = @import("std");
 const ssz = @import("ssz");
 const p = @import("primitive.zig");
 const c = @import("constants");
@@ -15,9 +14,11 @@ pub const Fork = phase0.Fork;
 pub const ForkData = phase0.ForkData;
 pub const Checkpoint = phase0.Checkpoint;
 pub const Validator = phase0.Validator;
+pub const Validators = phase0.Validators;
 pub const AttestationData = phase0.AttestationData;
 pub const PendingAttestation = phase0.PendingAttestation;
 pub const Eth1Data = phase0.Eth1Data;
+pub const Eth1DataVotes = phase0.Eth1DataVotes;
 pub const HistoricalBatch = phase0.HistoricalBatch;
 pub const DepositMessage = phase0.DepositMessage;
 pub const DepositData = phase0.DepositData;
@@ -33,6 +34,9 @@ pub const HistoricalStateRoots = phase0.HistoricalStateRoots;
 pub const ProposerSlashings = phase0.ProposerSlashings;
 pub const Deposits = phase0.Deposits;
 pub const VoluntaryExits = phase0.VoluntaryExits;
+pub const Slashings = phase0.Slashings;
+pub const Balances = phase0.Balances;
+pub const RandaoMixes = phase0.RandaoMixes;
 
 pub const SyncAggregate = altair.SyncAggregate;
 pub const SyncCommittee = altair.SyncCommittee;
@@ -84,11 +88,11 @@ pub const Cell = ssz.ByteVectorType(c.BYTES_PER_FIELD_ELEMENT * preset.FIELD_ELE
 // New containers for Data Availability Sampling
 pub const DataColumnSidecar = ssz.VariableContainerType(struct {
     index: ColumnIndex,
-    column: ssz.FixedListType(Cell, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK),
-    kzg_commitments: ssz.FixedListType(p.KZGCommitment, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK),
-    kzg_proofs: ssz.FixedListType(p.KZGProof, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK),
+    column: ssz.FixedListType(Cell, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK, .{}),
+    kzg_commitments: ssz.FixedListType(p.KZGCommitment, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK, .{}),
+    kzg_proofs: ssz.FixedListType(p.KZGProof, preset.MAX_BLOB_COMMITMENTS_PER_BLOCK, .{}),
     signed_block_header: SignedBeaconBlockHeader,
-    kzg_commitments_inclusion_proof: ssz.FixedVectorType(p.Bytes32, preset.KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH),
+    kzg_commitments_inclusion_proof: ssz.FixedVectorType(p.Bytes32, preset.KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH, .{}),
 });
 
 pub const MatrixEntry = ssz.FixedContainerType(struct {
@@ -112,6 +116,8 @@ pub const BlindedBeaconBlockBody = electra.BlindedBeaconBlockBody;
 pub const BlindedBeaconBlock = electra.BlindedBeaconBlock;
 pub const SignedBlindedBeaconBlock = electra.SignedBlindedBeaconBlock;
 
+pub const ProposerLookahead = ssz.FixedVectorType(p.ValidatorIndex, (preset.MIN_SEED_LOOKAHEAD + 1) * preset.SLOTS_PER_EPOCH, .{});
+
 // BeaconState with new proposer_lookahead field
 pub const BeaconState = ssz.VariableContainerType(struct {
     genesis_time: p.Uint64,
@@ -121,37 +127,37 @@ pub const BeaconState = ssz.VariableContainerType(struct {
     latest_block_header: BeaconBlockHeader,
     block_roots: HistoricalBlockRoots,
     state_roots: HistoricalStateRoots,
-    historical_roots: ssz.FixedListType(p.Root, preset.HISTORICAL_ROOTS_LIMIT),
+    historical_roots: ssz.FixedListType(p.Root, preset.HISTORICAL_ROOTS_LIMIT, .{}),
     eth1_data: Eth1Data,
     eth1_data_votes: phase0.Eth1DataVotes,
     eth1_deposit_index: p.Uint64,
-    validators: ssz.FixedListType(Validator, preset.VALIDATOR_REGISTRY_LIMIT),
-    balances: ssz.FixedListType(p.Gwei, preset.VALIDATOR_REGISTRY_LIMIT),
-    randao_mixes: ssz.FixedVectorType(p.Bytes32, preset.EPOCHS_PER_HISTORICAL_VECTOR),
-    slashings: ssz.FixedVectorType(p.Gwei, preset.EPOCHS_PER_SLASHINGS_VECTOR),
-    previous_epoch_participation: ssz.FixedListType(p.Uint8, preset.VALIDATOR_REGISTRY_LIMIT),
-    current_epoch_participation: ssz.FixedListType(p.Uint8, preset.VALIDATOR_REGISTRY_LIMIT),
+    validators: ssz.FixedListType(Validator, preset.VALIDATOR_REGISTRY_LIMIT, .{}),
+    balances: phase0.Balances,
+    randao_mixes: ssz.FixedVectorType(p.Bytes32, preset.EPOCHS_PER_HISTORICAL_VECTOR, .{}),
+    slashings: ssz.FixedVectorType(p.Gwei, preset.EPOCHS_PER_SLASHINGS_VECTOR, .{}),
+    previous_epoch_participation: altair.EpochParticipation,
+    current_epoch_participation: altair.EpochParticipation,
     justification_bits: ssz.BitVectorType(c.JUSTIFICATION_BITS_LENGTH),
     previous_justified_checkpoint: Checkpoint,
     current_justified_checkpoint: Checkpoint,
     finalized_checkpoint: Checkpoint,
-    inactivity_scores: ssz.FixedListType(p.Uint64, preset.VALIDATOR_REGISTRY_LIMIT),
+    inactivity_scores: altair.InactivityScores,
     current_sync_committee: SyncCommittee,
     next_sync_committee: SyncCommittee,
     latest_execution_payload_header: ExecutionPayloadHeader,
     next_withdrawal_index: p.WithdrawalIndex,
     next_withdrawal_validator_index: p.ValidatorIndex,
-    historical_summaries: ssz.FixedListType(HistoricalSummary, preset.HISTORICAL_ROOTS_LIMIT),
+    historical_summaries: ssz.FixedListType(HistoricalSummary, preset.HISTORICAL_ROOTS_LIMIT, .{}),
     deposit_requests_start_index: p.Uint64,
     deposit_balance_to_consume: p.Gwei,
     exit_balance_to_consume: p.Gwei,
     earliest_exit_epoch: p.Epoch,
     consolidation_balance_to_consume: p.Gwei,
     earliest_consolidation_epoch: p.Epoch,
-    pending_deposits: ssz.FixedListType(PendingDeposit, preset.PENDING_DEPOSITS_LIMIT),
-    pending_partial_withdrawals: ssz.FixedListType(PendingPartialWithdrawal, preset.PENDING_PARTIAL_WITHDRAWALS_LIMIT),
-    pending_consolidations: ssz.FixedListType(PendingConsolidation, preset.PENDING_CONSOLIDATIONS_LIMIT),
-    proposer_lookahead: ssz.FixedVectorType(p.ValidatorIndex, (preset.MIN_SEED_LOOKAHEAD + 1) * preset.SLOTS_PER_EPOCH),
+    pending_deposits: ssz.FixedListType(PendingDeposit, preset.PENDING_DEPOSITS_LIMIT, .{}),
+    pending_partial_withdrawals: ssz.FixedListType(PendingPartialWithdrawal, preset.PENDING_PARTIAL_WITHDRAWALS_LIMIT, .{}),
+    pending_consolidations: ssz.FixedListType(PendingConsolidation, preset.PENDING_CONSOLIDATIONS_LIMIT, .{}),
+    proposer_lookahead: ProposerLookahead,
 });
 
 pub const SignedBeaconBlock = ssz.VariableContainerType(struct {

@@ -1,9 +1,10 @@
 const std = @import("std");
+const Node = @import("persistent_merkle_tree").Node;
 const ct = @import("consensus_types");
 const ssz = @import("ssz");
 const ForkSeq = @import("config").ForkSeq;
 const state_transition = @import("state_transition");
-const TestCachedBeaconStateAllForks = state_transition.test_utils.TestCachedBeaconStateAllForks;
+const TestCachedBeaconState = state_transition.test_utils.TestCachedBeaconState;
 const TestCaseUtils = @import("../test_case.zig").TestCaseUtils;
 const loadSszValue = @import("../test_case.zig").loadSszSnappyValue;
 
@@ -11,6 +12,7 @@ const EpochTransitionCache = state_transition.EpochTransitionCache;
 const getRewardsAndPenaltiesFn = state_transition.getRewardsAndPenalties;
 
 const preset = @import("preset").preset;
+const active_preset = @import("preset").active_preset;
 
 pub const Handler = enum {
     basic,
@@ -23,12 +25,12 @@ pub const Handler = enum {
 };
 
 pub fn TestCase(comptime fork: ForkSeq) type {
-    const Balances = ssz.FixedListType(ct.primitive.Gwei, preset.VALIDATOR_REGISTRY_LIMIT);
+    const Balances = ssz.FixedListType(ct.primitive.Gwei, preset.VALIDATOR_REGISTRY_LIMIT, .{});
     const DeltasType = ssz.VariableVectorType(Balances, 2);
     const tc_utils = TestCaseUtils(fork);
 
     return struct {
-        pre: TestCachedBeaconStateAllForks,
+        pre: TestCachedBeaconState,
         expected_rewards: []u64,
         expected_penalties: []u64,
         actual_rewards: []u64,
@@ -36,22 +38,26 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         const Self = @This();
 
-        pub fn execute(allocator: std.mem.Allocator, dir: std.fs.Dir) !void {
-            var tc = try Self.init(allocator, dir);
+        pub fn execute(allocator: std.mem.Allocator, dir: std.Io.Dir) !void {
+            const pool_size = if (active_preset == .mainnet) 10_000_000 else 1_000_000;
+            var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+            defer pool.deinit();
+
+            var tc = try Self.init(allocator, &pool, dir);
             defer {
                 tc.deinit();
-                state_transition.deinitStateTransition();
+                state_transition.deinitStateTransition(std.testing.io);
             }
 
             try tc.runTest();
         }
 
-        fn init(allocator: std.mem.Allocator, dir: std.fs.Dir) !Self {
-            var pre_state = try tc_utils.loadPreState(allocator, dir);
+        fn init(allocator: std.mem.Allocator, pool: *Node.Pool, dir: std.Io.Dir) !Self {
+            var pre_state = try tc_utils.loadPreState(allocator, pool, dir);
             errdefer pre_state.deinit();
 
             const cache_allocator = pre_state.allocator;
-            const validator_count = pre_state.cached_state.state.validators().items.len;
+            const validator_count = try pre_state.cached_state.state.validatorsCount();
             const expected = try Self.buildExpectedRewardsPenalties(cache_allocator, dir, validator_count);
 
             return .{
@@ -72,7 +78,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         fn buildExpectedRewardsPenalties(
             allocator: std.mem.Allocator,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
             validator_count: usize,
         ) !struct { rewards: []u64, penalties: []u64 } {
             const expected_rewards = try allocator.alloc(u64, validator_count);
@@ -96,7 +102,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
             expected_rewards: []u64,
             expected_penalties: []u64,
             allocator: std.mem.Allocator,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
             comptime filename: []const u8,
         ) !void {
             var deltas = try Self.loadDeltas(allocator, dir, filename);
@@ -108,7 +114,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
             expected_rewards: []u64,
             expected_penalties: []u64,
             allocator: std.mem.Allocator,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
             comptime filename: []const u8,
         ) !void {
             if (try Self.loadOptionalDeltas(allocator, dir, filename)) |deltas_value| {
@@ -120,7 +126,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         fn loadDeltas(
             allocator: std.mem.Allocator,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
             comptime filename: []const u8,
         ) !DeltasType.Type {
             var deltas = DeltasType.default_value;
@@ -135,7 +141,7 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         fn loadOptionalDeltas(
             allocator: std.mem.Allocator,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
             comptime filename: []const u8,
         ) !?DeltasType.Type {
             var deltas = DeltasType.default_value;
@@ -159,22 +165,34 @@ pub fn TestCase(comptime fork: ForkSeq) type {
 
         fn process(self: *Self) !void {
             const allocator = self.pre.allocator;
-            const cloned_state = try self.pre.cached_state.clone(allocator);
+            const cloned_state = try self.pre.cached_state.clone(allocator, .{ .transfer_cache = false });
             defer {
                 cloned_state.deinit();
                 allocator.destroy(cloned_state);
             }
 
-            var epoch_cache = try EpochTransitionCache.init(allocator, cloned_state);
-            defer {
-                epoch_cache.deinit();
-                allocator.destroy(epoch_cache);
-            }
+            var epoch_transition_cache = try EpochTransitionCache.init(
+                allocator,
+                std.testing.io,
+                cloned_state.config,
+                cloned_state.epoch_cache,
+                cloned_state.state,
+            );
+            defer epoch_transition_cache.deinit(allocator);
 
-            try getRewardsAndPenaltiesFn(allocator, cloned_state, epoch_cache, epoch_cache.rewards, epoch_cache.penalties);
+            try getRewardsAndPenaltiesFn(
+                fork,
+                allocator,
+                cloned_state.config,
+                cloned_state.epoch_cache,
+                cloned_state.state.castToFork(fork),
+                &epoch_transition_cache,
+                epoch_transition_cache.rewards,
+                epoch_transition_cache.penalties,
+            );
 
-            self.actual_rewards = epoch_cache.rewards;
-            self.actual_penalties = epoch_cache.penalties;
+            self.actual_rewards = epoch_transition_cache.rewards;
+            self.actual_penalties = epoch_transition_cache.penalties;
         }
 
         fn accumulateDeltas(

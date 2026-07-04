@@ -1,36 +1,46 @@
 const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
-
+const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
+const BeaconState = @import("fork_types").BeaconState;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
 const GENESIS_EPOCH = @import("preset").GENESIS_EPOCH;
-const isInInactivityLeak = @import("../utils/finality.zig").isInInactivityLeak;
+const isInInactivityLeak = @import("inactivity_leak.zig").isInInactivityLeak;
 const attester_status_utils = @import("../utils/attester_status.zig");
 const hasMarkers = attester_status_utils.hasMarkers;
+const Node = @import("persistent_merkle_tree").Node;
 
-pub fn processInactivityUpdates(cached_state: *CachedBeaconStateAllForks, cache: *const EpochTransitionCache) !void {
-    if (cached_state.getEpochCache().epoch == GENESIS_EPOCH) {
+pub fn processInactivityUpdates(
+    comptime fork: ForkSeq,
+    allocator: std.mem.Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
+    cache: *const EpochTransitionCache,
+) !void {
+    if (epoch_cache.epoch == GENESIS_EPOCH) {
         return;
     }
 
-    const state = cached_state.state;
-    const config = cached_state.config.chain;
-    const INACTIVITY_SCORE_BIAS = config.INACTIVITY_SCORE_BIAS;
-    const INACTIVITY_SCORE_RECOVERY_RATE = config.INACTIVITY_SCORE_RECOVERY_RATE;
+    const INACTIVITY_SCORE_BIAS = config.chain.INACTIVITY_SCORE_BIAS;
+    const INACTIVITY_SCORE_RECOVERY_RATE = config.chain.INACTIVITY_SCORE_RECOVERY_RATE;
     const flags = cache.flags;
-    const is_in_activity_leak = isInInactivityLeak(cached_state);
+    const is_in_activity_leak = isInInactivityLeak(epoch_cache.epoch, try state.finalizedEpoch());
 
     // this avoids importing FLAG_ELIGIBLE_ATTESTER inside the for loop, check the compiled code
     const FLAG_PREV_TARGET_ATTESTER_UNSLASHED = attester_status_utils.FLAG_PREV_TARGET_ATTESTER_UNSLASHED;
     const FLAG_ELIGIBLE_ATTESTER = attester_status_utils.FLAG_ELIGIBLE_ATTESTER;
 
-    // for TreeView, we may need a reused inactivityScoresArr
-    // TODO: assert this once https://github.com/ChainSafe/state-transition-z/issues/33
+    var inactivity_scores = try state.inactivityScores();
+    try inactivity_scores.commit();
+    const inactivity_scores_values = try inactivity_scores.getAll(allocator);
+    defer allocator.free(inactivity_scores_values);
 
-    const inactivity_scores = state.inactivityScores();
+    std.debug.assert(flags.len <= inactivity_scores_values.len);
     for (0..flags.len) |i| {
         const flag = flags[i];
         if (hasMarkers(flag, FLAG_ELIGIBLE_ATTESTER)) {
-            var inactivity_score = inactivity_scores.items[i];
+            var inactivity_score = inactivity_scores_values[i];
 
             const prev_inactivity_score = inactivity_score;
             if (hasMarkers(flag, FLAG_PREV_TARGET_ATTESTER_UNSLASHED)) {
@@ -42,8 +52,29 @@ pub fn processInactivityUpdates(cached_state: *CachedBeaconStateAllForks, cache:
                 inactivity_score -= @min(INACTIVITY_SCORE_RECOVERY_RATE, inactivity_score);
             }
             if (inactivity_score != prev_inactivity_score) {
-                inactivity_scores.items[i] = inactivity_score;
+                try inactivity_scores.set(i, inactivity_score);
             }
         }
     }
+}
+
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+
+test "processInactivityUpdates - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
+
+    try processInactivityUpdates(
+        .electra,
+        allocator,
+        test_state.cached_state.config,
+        test_state.cached_state.epoch_cache,
+        test_state.cached_state.state.castToFork(.electra),
+        test_state.epoch_transition_cache,
+    );
 }

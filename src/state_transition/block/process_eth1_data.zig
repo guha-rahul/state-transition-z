@@ -1,41 +1,54 @@
 const std = @import("std");
+const ForkSeq = @import("config").ForkSeq;
+const BeaconState = @import("fork_types").BeaconState;
 const types = @import("consensus_types");
 const Eth1Data = types.phase0.Eth1Data.Type;
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
 const preset = @import("preset").preset;
+const Node = @import("persistent_merkle_tree").Node;
 
-pub fn processEth1Data(allocator: std.mem.Allocator, cached_state: *const CachedBeaconStateAllForks, eth1_data: *const Eth1Data) !void {
-    const state = cached_state.state;
-    if (becomesNewEth1Data(cached_state, eth1_data)) {
-        const state_eth1_data = state.eth1Data();
-        state_eth1_data.* = eth1_data.*;
+pub fn processEth1Data(
+    comptime fork: ForkSeq,
+    state: *BeaconState(fork),
+    eth1_data: *const Eth1Data,
+) !void {
+    if (try becomesNewEth1Data(fork, state, eth1_data)) {
+        try state.setEth1Data(eth1_data);
     }
 
-    try state.eth1DataVotes().append(allocator, eth1_data.*);
+    try state.appendEth1DataVote(eth1_data);
 }
 
-pub fn becomesNewEth1Data(cached_state: *const CachedBeaconStateAllForks, new_eth1_data: *const Eth1Data) bool {
-    const state = cached_state.state;
+pub fn becomesNewEth1Data(
+    comptime fork: ForkSeq,
+    state: *BeaconState(fork),
+    new_eth1_data: *const Eth1Data,
+) !bool {
     const SLOTS_PER_ETH1_VOTING_PERIOD = preset.EPOCHS_PER_ETH1_VOTING_PERIOD * preset.SLOTS_PER_EPOCH;
 
     // If there are not more than 50% votes, then we do not have to count to find a winner.
-    const state_eth1_data_votes = state.eth1DataVotes().items;
-    if ((state_eth1_data_votes.len + 1) * 2 <= SLOTS_PER_ETH1_VOTING_PERIOD) {
-        return false;
-    }
+    var state_eth1_data_votes_view = try state.eth1DataVotes();
+    const state_eth1_data_votes_len = try state_eth1_data_votes_view.length();
+    if ((state_eth1_data_votes_len + 1) * 2 <= SLOTS_PER_ETH1_VOTING_PERIOD) return false;
 
     // Nothing to do if the state already has this as eth1data (happens a lot after majority vote is in)
-    if (isEqualEth1DataView(state.eth1Data(), new_eth1_data)) {
-        return false;
-    }
+    var state_eth1_data_view = try state.eth1Data();
+    var state_eth1_data: Eth1Data = undefined;
+    try state_eth1_data_view.toValue(undefined, &state_eth1_data);
+    if (types.phase0.Eth1Data.equals(&state_eth1_data, new_eth1_data)) return false;
+
+    var new_eth1_data_root: [32]u8 = undefined;
+    try types.phase0.Eth1Data.hashTreeRoot(new_eth1_data, &new_eth1_data_root);
 
     // Close to half the EPOCHS_PER_ETH1_VOTING_PERIOD it can be expensive to do so many comparisions.
-    // `eth1DataVotes.getAllReadonly()` navigates the tree once to fetch all the LeafNodes efficiently.
+    //
+    // `iteratorReadonly` navigates the tree once to fetch all the LeafNodes efficiently.
     // Then isEqualEth1DataView compares cached roots (HashObject as of Jan 2022) which is much cheaper
     // than doing structural equality, which requires tree -> value conversions
     var same_votes_count: usize = 0;
-    for (state_eth1_data_votes) |state_eth1_data_vote| {
-        if (isEqualEth1DataView(&state_eth1_data_vote, new_eth1_data)) {
+    var eth1_data_votes_it = state_eth1_data_votes_view.iteratorReadonly(0);
+    for (0..state_eth1_data_votes_len) |_| {
+        const state_eth1_data_vote_root = try eth1_data_votes_it.nextRoot();
+        if (std.mem.eql(u8, state_eth1_data_vote_root, &new_eth1_data_root)) {
             same_votes_count += 1;
         }
     }
@@ -48,7 +61,21 @@ pub fn becomesNewEth1Data(cached_state: *const CachedBeaconStateAllForks, new_et
     return false;
 }
 
-// TODO: should have a different implement in TreeView
-fn isEqualEth1DataView(a: *const Eth1Data, b: *const Eth1Data) bool {
-    return types.phase0.Eth1Data.equals(a, b);
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+
+test "process eth1 data - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 256 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 256);
+    defer test_state.deinit();
+
+    const block = types.electra.BeaconBlock.default_value;
+    try processEth1Data(
+        .electra,
+        test_state.cached_state.state.castToFork(.electra),
+        &block.body.eth1_data,
+    );
 }

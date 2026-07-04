@@ -1,22 +1,45 @@
-const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
 const ForkSeq = @import("config").ForkSeq;
+const BeaconState = @import("fork_types").BeaconState;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const EpochTransitionCache = @import("../cache/epoch_transition_cache.zig").EpochTransitionCache;
-const types = @import("consensus_types");
 const preset = @import("preset").preset;
 
 /// Resets slashings for the next epoch.
 /// PERF: Almost no (constant) cost
-pub fn processSlashingsReset(cached_state: *CachedBeaconStateAllForks, cache: *const EpochTransitionCache) void {
-    const state = cached_state.state;
-    const epoch_cache = cached_state.getEpochCache();
+pub fn processSlashingsReset(
+    comptime fork: ForkSeq,
+    epoch_cache: *EpochCache,
+    state: *BeaconState(fork),
+    cache: *const EpochTransitionCache,
+) !void {
     const next_epoch = cache.current_epoch + 1;
 
     // reset slashings
     const slash_index = next_epoch % preset.EPOCHS_PER_SLASHINGS_VECTOR;
-    const slashings = state.slashings();
-    const slashing = slashings[slash_index];
+    var slashings = try state.slashings();
+    const slashing = try slashings.get(slash_index);
     const old_slashing_value_by_increment = slashing / preset.EFFECTIVE_BALANCE_INCREMENT;
-    slashings[slash_index] = 0;
+    try slashings.set(slash_index, 0);
     epoch_cache.total_slashings_by_increment = @max(0, epoch_cache.total_slashings_by_increment - old_slashing_value_by_increment);
+}
+
+const std = @import("std");
+const TestCachedBeaconState = @import("../test_utils/root.zig").TestCachedBeaconState;
+const Node = @import("persistent_merkle_tree").Node;
+
+test "processSlashingsReset - sanity" {
+    const allocator = std.testing.allocator;
+    const pool_size = 10_000 * 5;
+    var pool = try Node.Pool.init(.{ .page_allocator = allocator, .allocator = allocator, .pool_size = pool_size });
+    defer pool.deinit();
+
+    var test_state = try TestCachedBeaconState.init(allocator, &pool, 10_000);
+    defer test_state.deinit();
+
+    try processSlashingsReset(
+        .electra,
+        test_state.cached_state.epoch_cache,
+        test_state.cached_state.state.castToFork(.electra),
+        test_state.epoch_transition_cache,
+    );
 }

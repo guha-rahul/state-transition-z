@@ -1,31 +1,49 @@
 const std = @import("std");
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
 const ValidatorIndex = types.primitive.ValidatorIndex.Type;
 const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
 const types = @import("consensus_types");
 const preset = @import("preset").preset;
-const verifySingleSignatureSet = @import("../utils/signature_sets.zig").verifySingleSignatureSet;
+const ForkTypes = @import("fork_types").ForkTypes;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const verifyAggregatedSignatureSet = @import("../utils/signature_sets.zig").verifyAggregatedSignatureSet;
 const getIndexedAttestationSignatureSet = @import("../signature_sets/indexed_attestation.zig").getIndexedAttestationSignatureSet;
 
-pub fn isValidIndexedAttestation(comptime IA: type, cached_state: *const CachedBeaconStateAllForks, indexed_attestation: *const IA, verify_signature: bool) !bool {
-    if (!isValidIndexedAttestationIndices(cached_state, indexed_attestation.attesting_indices.items)) {
+pub fn isValidIndexedAttestation(
+    comptime fork: ForkSeq,
+    allocator: std.mem.Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    validators_count: usize,
+    indexed_attestation: *const ForkTypes(fork).IndexedAttestation.Type,
+    verify_signature: bool,
+) !bool {
+    if (!(try isValidIndexedAttestationIndices(fork, validators_count, indexed_attestation.attesting_indices.items))) {
         return false;
     }
 
     if (verify_signature) {
-        const signature_set = try getIndexedAttestationSignatureSet(IA, cached_state.allocator, cached_state, indexed_attestation);
-        defer cached_state.allocator.free(signature_set.pubkeys);
+        const signature_set = try getIndexedAttestationSignatureSet(
+            fork,
+            allocator,
+            config,
+            epoch_cache,
+            indexed_attestation,
+        );
+        defer allocator.free(signature_set.pubkeys);
         return try verifyAggregatedSignatureSet(&signature_set);
     } else {
         return true;
     }
 }
 
-pub fn isValidIndexedAttestationIndices(cached_state: *const CachedBeaconStateAllForks, indices: []const ValidatorIndex) bool {
+pub fn isValidIndexedAttestationIndices(
+    comptime fork: ForkSeq,
+    validators_count: usize,
+    indices: []const ValidatorIndex,
+) !bool {
     // verify max number of indices
-    const fork_seq = cached_state.state.forkSeq();
-    const max_indices: usize = if (fork_seq.isPostElectra())
+    const max_indices: usize = if (fork.gte(.electra))
         preset.MAX_VALIDATORS_PER_COMMITTEE * preset.MAX_COMMITTEES_PER_SLOT
     else
         preset.MAX_VALIDATORS_PER_COMMITTEE;
@@ -45,13 +63,11 @@ pub fn isValidIndexedAttestationIndices(cached_state: *const CachedBeaconStateAl
         prev = index;
     }
 
-    // check if indices are out of bounds, by checking the highest index (since it is sorted)
-    const validator_count = cached_state.state.validators().items.len;
-    if (indices.len > 0) {
-        const last_index = indices[indices.len - 1];
-        if (last_index >= validator_count) {
-            return false;
-        }
+    // check if indices are out of bounds, by checking the highest index (since it is sorted).
+    // After the uniqueness loop above, prev already holds the last (highest) index.
+    // indices.len > 0 is guaranteed by the first check.
+    if (prev >= validators_count) {
+        return false;
     }
 
     return true;

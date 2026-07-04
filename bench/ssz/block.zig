@@ -1,7 +1,11 @@
 const std = @import("std");
-const BeaconBlock = @import("consensus_types").deneb.SignedBeaconBlock;
+// TODO make this fork-agnostic
+const BeaconBlock = @import("consensus_types").fulu.SignedBeaconBlock;
 const ssz = @import("ssz");
 const zbench = @import("zbench");
+const download_era_options = @import("download_era_options");
+const era = @import("era");
+const config = @import("config");
 
 // printf "Date: %s\nKernel: %s\nCPU: %s\nCPUs: %s\nMemory: %s\n" "$(date)" "$(uname -r)" "$(lscpu | grep 'Model name' | awk -F: '{print $2}' | xargs)" "$(lscpu | grep '^CPU(s):' | awk '{print $2}')" "$(free -h | grep Mem | awk '{print $2}')"
 // Date: Mon Apr 21 12:59:32 PM EDT 2025
@@ -26,7 +30,7 @@ const zbench = @import("zbench");
 
 const SerializeBlock = struct {
     block: *BeaconBlock.Type,
-    pub fn run(self: SerializeBlock, allocator: std.mem.Allocator) void {
+    pub fn run(self: *SerializeBlock, allocator: std.mem.Allocator) void {
         const out = allocator.alloc(u8, BeaconBlock.serializedSize(self.block)) catch unreachable;
         _ = BeaconBlock.serializeIntoBytes(self.block, out);
     }
@@ -35,7 +39,7 @@ const SerializeBlock = struct {
 const SerializeBlockNoAlloc = struct {
     block: *BeaconBlock.Type,
     out: []u8,
-    pub fn run(self: SerializeBlockNoAlloc, allocator: std.mem.Allocator) void {
+    pub fn run(self: *SerializeBlockNoAlloc, allocator: std.mem.Allocator) void {
         _ = allocator;
         _ = BeaconBlock.serializeIntoBytes(self.block, self.out);
     }
@@ -43,7 +47,7 @@ const SerializeBlockNoAlloc = struct {
 
 const DeserializeBlock = struct {
     bytes: []const u8,
-    pub fn run(self: DeserializeBlock, allocator: std.mem.Allocator) void {
+    pub fn run(self: *DeserializeBlock, allocator: std.mem.Allocator) void {
         const out = allocator.create(BeaconBlock.Type) catch unreachable;
         out.* = BeaconBlock.default_value;
         BeaconBlock.deserializeFromBytes(allocator, self.bytes, out) catch unreachable;
@@ -53,14 +57,14 @@ const DeserializeBlock = struct {
 const DeserializeBlockNoAlloc = struct {
     bytes: []const u8,
     out: *BeaconBlock.Type,
-    pub fn run(self: DeserializeBlockNoAlloc, allocator: std.mem.Allocator) void {
+    pub fn run(self: *DeserializeBlockNoAlloc, allocator: std.mem.Allocator) void {
         BeaconBlock.deserializeFromBytes(allocator, self.bytes, self.out) catch unreachable;
     }
 };
 
 const ValidateBlock = struct {
     bytes: []const u8,
-    pub fn run(self: ValidateBlock, allocator: std.mem.Allocator) void {
+    pub fn run(self: *ValidateBlock, allocator: std.mem.Allocator) void {
         _ = allocator;
         BeaconBlock.serialized.validate(self.bytes) catch unreachable;
     }
@@ -68,7 +72,7 @@ const ValidateBlock = struct {
 
 const HashBlock = struct {
     block: *BeaconBlock.Type,
-    pub fn run(self: HashBlock, allocator: std.mem.Allocator) void {
+    pub fn run(self: *HashBlock, allocator: std.mem.Allocator) void {
         var scratch = ssz.Hasher(BeaconBlock).init(allocator) catch unreachable;
         var out: [32]u8 = undefined;
         ssz.Hasher(BeaconBlock).hash(&scratch, self.block, &out) catch unreachable;
@@ -78,7 +82,7 @@ const HashBlock = struct {
 const HashBlockNoAlloc = struct {
     block: *BeaconBlock.Type,
     scratch: *ssz.HasherData,
-    pub fn run(self: HashBlockNoAlloc, allocator: std.mem.Allocator) void {
+    pub fn run(self: *HashBlockNoAlloc, allocator: std.mem.Allocator) void {
         _ = allocator;
         var out: [32]u8 = undefined;
         ssz.Hasher(BeaconBlock).hash(self.scratch, self.block, &out) catch unreachable;
@@ -87,7 +91,7 @@ const HashBlockNoAlloc = struct {
 
 const HashBlockOneshot = struct {
     block: *BeaconBlock.Type,
-    pub fn run(self: HashBlockOneshot, allocator: std.mem.Allocator) void {
+    pub fn run(self: *HashBlockOneshot, allocator: std.mem.Allocator) void {
         var out: [32]u8 = undefined;
         BeaconBlock.hashTreeRoot(allocator, self.block, &out) catch unreachable;
     }
@@ -95,21 +99,31 @@ const HashBlockOneshot = struct {
 
 const HashBlockSerialized = struct {
     bytes: []const u8,
-    pub fn run(self: HashBlockSerialized, allocator: std.mem.Allocator) void {
+    pub fn run(self: *HashBlockSerialized, allocator: std.mem.Allocator) void {
         var out: [32]u8 = undefined;
         BeaconBlock.serialized.hashTreeRoot(allocator, self.bytes, &out) catch unreachable;
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
-    const stdout = std.io.getStdOut().writer();
+    const io = init.io;
     var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
 
-    const block_file = try std.fs.cwd().openFile("bench/block.ssz", .{});
-    defer block_file.close();
-    const block_bytes = try block_file.readToEndAlloc(allocator, 1_000_000_000);
+    const era_path = try std.fs.path.join(
+        allocator,
+        &[_][]const u8{ download_era_options.era_out_dir, download_era_options.era_files[1] },
+    );
+    defer allocator.free(era_path);
+
+    var era_reader = try era.Reader.open(allocator, io, config.mainnet.config, era_path);
+    defer era_reader.close(allocator);
+
+    const block_slot = try era.era.computeStartBlockSlotFromEraNumber(era_reader.era_number) + 1;
+
+    const block_bytes: []u8 = @constCast(try era_reader.readSerializedBlock(allocator, block_slot) orelse return error.InvalidEraFile);
+    defer allocator.free(block_bytes);
 
     const block = allocator.create(BeaconBlock.Type) catch unreachable;
     block.* = BeaconBlock.default_value;
@@ -146,5 +160,5 @@ pub fn main() !void {
     const hash_block_serialized = HashBlockSerialized{ .bytes = block_bytes };
     try bench.addParam("hash block serialized", &hash_block_serialized, .{});
 
-    try bench.run(stdout);
+    try bench.run(io, std.Io.File.stdout());
 }

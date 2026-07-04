@@ -1,9 +1,7 @@
-const std = @import("std");
-const Allocator = std.mem.Allocator;
 const types = @import("consensus_types");
-pub const blst = @import("blst");
-const PublicKey = blst.PublicKey;
-const Signature = blst.Signature;
+pub const bls = @import("bls");
+const PublicKey = bls.PublicKey;
+const Signature = bls.Signature;
 const Root = types.primitive.Root.Type;
 const BLSSignature = types.primitive.BLSSignature.Type;
 const verify = @import("./bls.zig").verify;
@@ -28,13 +26,17 @@ pub const AggregatedSignatureSet = struct {
 pub fn verifySingleSignatureSet(set: *const SingleSignatureSet) !bool {
     // All signatures are not trusted and must be group checked (p2.subgroup_check)
     const signature = try Signature.uncompress(&set.signature);
-    return verify(&set.signing_root, &set.pubkey, &signature, null, null);
+    if (verify(&set.signing_root, &set.pubkey, &signature, .{})) {
+        return true;
+    } else |_| {
+        return false;
+    }
 }
 
 pub fn verifyAggregatedSignatureSet(set: *const AggregatedSignatureSet) !bool {
     // All signatures are not trusted and must be group checked (p2.subgroup_check)
     const signature = try Signature.uncompress(&set.signature);
-    return fastAggregateVerify(&set.signing_root, set.pubkeys, &signature, null, null);
+    return fastAggregateVerify(&set.signing_root, set.pubkeys, &signature, .{});
 }
 
 pub fn createSingleSignatureSetFromComponents(pubkey: *const PublicKey, signing_root: Root, signature: BLSSignature) SingleSignatureSet {

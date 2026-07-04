@@ -1,74 +1,79 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const CachedBeaconStateAllForks = @import("../cache/state_cache.zig").CachedBeaconStateAllForks;
-const BeaconStateAllForks = @import("../types/beacon_state.zig").BeaconStateAllForks;
-const ssz = @import("ssz");
 const types = @import("consensus_types");
 const preset = @import("preset").preset;
 const ForkSeq = @import("config").ForkSeq;
+const BeaconConfig = @import("config").BeaconConfig;
+const EpochCache = @import("../cache/epoch_cache.zig").EpochCache;
 const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
 const isValidIndexedAttestation = @import("./is_valid_indexed_attestation.zig").isValidIndexedAttestation;
+const ForkTypes = @import("fork_types").ForkTypes;
+const BeaconState = @import("fork_types").BeaconState;
 const Slot = types.primitive.Slot.Type;
-const Checkpoint = types.phase0.Checkpoint.Type;
-const Phase0Attestation = types.phase0.Attestation.Type;
-const ElectraAttestation = types.electra.Attestation.Type;
 const PendingAttestation = types.phase0.PendingAttestation.Type;
 
-pub fn processAttestationPhase0(allocator: Allocator, cached_state: *CachedBeaconStateAllForks, attestation: *const Phase0Attestation, verify_signature: bool) !void {
-    const state = cached_state.state;
-    const epoch_cache = cached_state.getEpochCache();
-    const slot = state.slot();
+pub fn processAttestationPhase0(
+    allocator: Allocator,
+    config: *const BeaconConfig,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(.phase0),
+    attestation: *const ForkTypes(.phase0).Attestation.Type,
+    verify_signature: bool,
+) !void {
+    const slot = try state.slot();
+    const validators_count = try state.validatorsCount();
+
     const data = attestation.data;
 
-    try validateAttestation(types.phase0.Attestation.Type, cached_state, attestation);
-
-    // should store a clone of aggregation_bits on Phase0 BeaconState to avoid double free error
-    var cloned_aggregation_bits: ssz.BitListType(preset.MAX_VALIDATORS_PER_COMMITTEE).Type = undefined;
-    try ssz.BitListType(preset.MAX_VALIDATORS_PER_COMMITTEE).clone(allocator, &attestation.aggregation_bits, &cloned_aggregation_bits);
-    var appended: bool = false;
-    errdefer {
-        if (!appended) {
-            cloned_aggregation_bits.deinit(allocator);
-        }
-    }
+    try validateAttestation(.phase0, epoch_cache, state, attestation);
 
     const pending_attestation = PendingAttestation{
         .data = data,
-        .aggregation_bits = cloned_aggregation_bits,
+        .aggregation_bits = attestation.aggregation_bits,
         .inclusion_delay = slot - data.slot,
         .proposer_index = try epoch_cache.getBeaconProposer(slot),
     };
 
+    var justified_checkpoint: types.phase0.Checkpoint.Type = undefined;
+    var epoch_pending_attestations: *types.phase0.EpochAttestations.TreeView = undefined;
     if (data.target.epoch == epoch_cache.epoch) {
-        if (!types.phase0.Checkpoint.equals(&data.source, state.currentJustifiedCheckpoint())) {
-            return error.InvalidAttestationSourceNotEqualToCurrentJustifiedCheckpoint;
-        }
-        if (state.currentEpochPendingAttestations().append(allocator, pending_attestation)) |_| {
-            appended = true;
-        } else |err| return err;
+        try state.currentJustifiedCheckpoint(&justified_checkpoint);
+        epoch_pending_attestations = try state.currentEpochPendingAttestations();
     } else {
-        if (!types.phase0.Checkpoint.equals(&data.source, state.previousJustifiedCheckpoint())) {
-            return error.InvalidAttestationSourceNotEqualToPreviousJustifiedCheckpoint;
-        }
-        if (state.previousEpochPendingAttestations().append(allocator, pending_attestation)) |_| {
-            appended = true;
-        } else |err| return err;
+        try state.previousJustifiedCheckpoint(&justified_checkpoint);
+        epoch_pending_attestations = try state.previousEpochPendingAttestations();
     }
+
+    if (!types.phase0.Checkpoint.equals(&data.source, &justified_checkpoint)) {
+        return error.InvalidAttestationSourceNotEqualToJustifiedCheckpoint;
+    }
+    try epoch_pending_attestations.pushValue(&pending_attestation);
 
     var indexed_attestation: types.phase0.IndexedAttestation.Type = undefined;
     try epoch_cache.computeIndexedAttestationPhase0(attestation, &indexed_attestation);
     defer types.phase0.IndexedAttestation.deinit(allocator, &indexed_attestation);
 
-    if (!try isValidIndexedAttestation(types.phase0.IndexedAttestation.Type, cached_state, &indexed_attestation, verify_signature)) {
+    if (!try isValidIndexedAttestation(
+        .phase0,
+        allocator,
+        config,
+        epoch_cache,
+        validators_count,
+        &indexed_attestation,
+        verify_signature,
+    )) {
         return error.InvalidAttestationInvalidIndexedAttestation;
     }
 }
 
 /// AT could be either Phase0Attestation or ElectraAttestation
-pub fn validateAttestation(comptime AT: type, cached_state: *const CachedBeaconStateAllForks, attestation: *const AT) !void {
-    const epoch_cache = cached_state.getEpochCache();
-    const state = cached_state.state;
-    const state_slot = state.slot();
+pub fn validateAttestation(
+    comptime fork: ForkSeq,
+    epoch_cache: *const EpochCache,
+    state: *BeaconState(fork),
+    attestation: *const ForkTypes(fork).Attestation.Type,
+) !void {
+    const state_slot = try state.slot();
     const data = attestation.data;
     const computed_epoch = computeEpochAtSlot(data.slot);
     const committee_count = try epoch_cache.getCommitteeCountPerSlot(computed_epoch);
@@ -82,12 +87,11 @@ pub fn validateAttestation(comptime AT: type, cached_state: *const CachedBeaconS
     }
 
     // post deneb, the attestations are valid till end of next epoch
-    if (!(data.slot + preset.MIN_ATTESTATION_INCLUSION_DELAY <= state_slot and isTimelyTarget(state, state_slot - data.slot))) {
+    if (!(data.slot + preset.MIN_ATTESTATION_INCLUSION_DELAY <= state_slot and isTimelyTarget(fork, state_slot - data.slot))) {
         return error.InvalidAttestationSlotNotWithInInclusionWindow;
     }
 
-    // same to fork >= ForkSeq.electra but more type safe
-    if (AT == ElectraAttestation) {
+    if (fork.gte(.electra)) {
         if (data.index != 0) {
             return error.InvalidAttestationNonZeroDataIndex;
         }
@@ -148,9 +152,9 @@ pub fn validateAttestation(comptime AT: type, cached_state: *const CachedBeaconS
     }
 }
 
-pub fn isTimelyTarget(state: *const BeaconStateAllForks, inclusion_distance: Slot) bool {
+pub fn isTimelyTarget(comptime fork: ForkSeq, inclusion_distance: Slot) bool {
     // post deneb attestation is valid till end of next epoch for target
-    if (state.isPostDeneb()) {
+    if (fork.gte(.deneb)) {
         return true;
     }
 
