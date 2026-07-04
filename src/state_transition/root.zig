@@ -113,7 +113,6 @@ pub const calculateShufflingDecisionRoot = EpochShuffling.calculateShufflingDeci
 pub const processProposerLookahead = @import("./epoch/process_proposer_lookahead.zig").processProposerLookahead;
 pub const processBuilderPendingPayments = @import("./epoch/process_builder_pending_payments.zig").processBuilderPendingPayments;
 pub const processExecutionPayloadBid = @import("./block/process_execution_payload_bid.zig").processExecutionPayloadBid;
-pub const processExecutionPayloadEnvelope = @import("./block/process_execution_payload_envelope.zig").processExecutionPayloadEnvelope;
 pub const processPayloadAttestation = @import("./block/process_payload_attestation.zig").processPayloadAttestation;
 pub const processPtcWindow = @import("./epoch/process_ptc_window.zig").processPtcWindow;
 pub const processParentExecutionPayload = @import("./block/process_parent_execution_payload.zig").processParentExecutionPayload;

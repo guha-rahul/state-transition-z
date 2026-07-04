@@ -53,7 +53,7 @@ pub fn processWithdrawals(
 
     const expected_withdrawals = expected_withdrawals_result.withdrawals.items;
 
-    // After EIP-7732, withdrawals are verified later in processExecutionPayloadEnvelope
+    // After EIP-7732, withdrawals are checked through parent execution payload processing.
     if (comptime fork.lt(.gloas)) {
         var expected_withdrawals_root: [32]u8 = undefined;
         try types.capella.Withdrawals.hashTreeRoot(allocator, &expected_withdrawals_result.withdrawals, &expected_withdrawals_root);
@@ -71,7 +71,7 @@ pub fn processWithdrawals(
     }
 
     if (comptime fork.gte(.gloas)) {
-        // Store expected withdrawals for verification in processExecutionPayloadEnvelope
+        // Store expected withdrawals for parent execution payload verification.
         var payload_expected_withdrawals = try state.inner.get("payload_expected_withdrawals");
         const current_len = try payload_expected_withdrawals.length();
         var new_list = try payload_expected_withdrawals.sliceFrom(current_len);

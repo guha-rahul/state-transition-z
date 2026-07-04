@@ -92,12 +92,7 @@ fn loadExecutionValid(allocator: std.mem.Allocator, dir: std.Io.Dir) bool {
 pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
     const ForkTypes = @field(ssz, fork.name());
     const tc_utils = TestCaseUtils(fork);
-    // After EIP-7732, gloas execution_payload tests use SignedExecutionPayloadEnvelope
-    const is_gloas_exec_payload = comptime (operation == .execution_payload and fork.gte(.gloas));
-    const OpType = if (is_gloas_exec_payload)
-        ForkTypes.SignedExecutionPayloadEnvelope
-    else
-        @field(ForkTypes, operation.operationObject());
+    const OpType = @field(ForkTypes, operation.operationObject());
 
     return struct {
         pre: TestCachedBeaconState,
@@ -141,10 +136,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
 
             // load the op
             // After EIP-7732, gloas withdrawals tests don't have an execution_payload input file
-            const input_name = comptime if (is_gloas_exec_payload)
-                "signed_envelope"
-            else
-                operation.inputName();
+            const input_name = comptime operation.inputName();
             if (comptime !(operation == .withdrawals and fork.gte(.gloas))) {
                 try loadSszValue(OpType, allocator, dir, input_name ++ ".ssz_snappy", &tc.op);
             }
@@ -246,36 +238,21 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                 .execution_payload => {
                     const config = cached_state.config;
                     const epoch_cache = cached_state.epoch_cache;
-                    if (comptime is_gloas_exec_payload) {
-                        // After EIP-7732, execution_payload tests use processExecutionPayloadEnvelope
-                        if (!self.execution_valid) {
-                            return error.ExecutionPayloadInvalid;
-                        }
-                        try state_transition.processExecutionPayloadEnvelope(
-                            allocator,
-                            config,
-                            epoch_cache,
-                            state,
-                            &self.op,
-                            .{ .verify_signature = true, .verify_state_root = true },
-                        );
-                    } else {
-                        const current_epoch = epoch_cache.epoch;
-                        const fork_body = BeaconBlockBody(.full, fork){ .inner = self.op };
-                        try state_transition.processExecutionPayload(
-                            fork,
-                            allocator,
-                            config,
-                            state,
-                            current_epoch,
-                            .full,
-                            &fork_body,
-                            .{
-                                .data_availability_status = .available,
-                                .execution_payload_status = if (self.post != null) .valid else .invalid,
-                            },
-                        );
-                    }
+                    const current_epoch = epoch_cache.epoch;
+                    const fork_body = BeaconBlockBody(.full, fork){ .inner = self.op };
+                    try state_transition.processExecutionPayload(
+                        fork,
+                        allocator,
+                        config,
+                        state,
+                        current_epoch,
+                        .full,
+                        &fork_body,
+                        .{
+                            .data_availability_status = .available,
+                            .execution_payload_status = if (self.execution_valid) .valid else .invalid,
+                        },
+                    );
                 },
                 .execution_payload_bid => {
                     const config = cached_state.config;
