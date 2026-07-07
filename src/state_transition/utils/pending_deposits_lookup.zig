@@ -21,25 +21,25 @@ const validateDepositSignature = @import("../block/process_deposit.zig").validat
 const BLSPubkey = ct.primitive.BLSPubkey.Type;
 const PendingDeposit = ct.electra.PendingDeposit.Type;
 
-const PendingDepositEntry = struct {
-    deposits: std.ArrayList(PendingDeposit) = .empty,
-    validated_count: usize = 0,
-    has_valid_signature: bool = false,
-
-    fn deinit(self: *PendingDepositEntry, allocator: Allocator) void {
-        self.deposits.deinit(allocator);
-    }
-};
-
 pub const PendingDepositsLookup = struct {
     allocator: Allocator,
-    deposits_by_pubkey: std.AutoHashMap(BLSPubkey, PendingDepositEntry),
+    deposits_by_pubkey: std.AutoHashMap(BLSPubkey, PendingDeposits),
+
+    const PendingDeposits = struct {
+        deposits: std.ArrayList(PendingDeposit) = .empty,
+        validated_count: usize = 0,
+        has_valid_signature: bool = false,
+
+        fn deinit(self: *PendingDeposits, allocator: Allocator) void {
+            self.deposits.deinit(allocator);
+        }
+    };
 
     /// Build an empty lookup for a sequence that will be populated incrementally.
     pub fn buildEmpty(allocator: Allocator) PendingDepositsLookup {
         return .{
             .allocator = allocator,
-            .deposits_by_pubkey = std.AutoHashMap(BLSPubkey, PendingDepositEntry).init(allocator),
+            .deposits_by_pubkey = std.AutoHashMap(BLSPubkey, PendingDeposits).init(allocator),
         };
     }
 
