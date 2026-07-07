@@ -1,3 +1,15 @@
+//! Mutable lookup for the pending-deposit sequence used by builder-routing logic.
+//!
+//! This is to implement the spec's `is_pending_validator(pending_deposits, pubkey)` lazily:
+//! deposits are grouped by pubkey without verifying signatures, and BLS verification is
+//! deferred until a builder deposit needs to know whether the same pubkey already has a
+//! valid pending validator deposit.
+//!
+//! Call `add()` whenever a deposit is appended to the represented sequence. A cached `true`
+//! result short-circuits all subsequent checks for that pubkey; a cached `false` records
+//! how many deposits were already verified, so appending a new deposit only verifies the
+//! newly-appended tail rather than re-running BLS on previously-invalid entries.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const BeaconConfig = @import("config").BeaconConfig;
@@ -23,6 +35,7 @@ pub const PendingDepositsLookup = struct {
     allocator: Allocator,
     deposits_by_pubkey: std.AutoHashMap(BLSPubkey, PendingDepositEntry),
 
+    /// Build an empty lookup for a sequence that will be populated incrementally.
     pub fn buildEmpty(allocator: Allocator) PendingDepositsLookup {
         return .{
             .allocator = allocator,
@@ -30,6 +43,8 @@ pub const PendingDepositsLookup = struct {
         };
     }
 
+    /// Build a pubkey -> pending-deposits lookup from `state.pendingDeposits`.
+    /// No BLS work is done here; signature verification happens lazily in `hasPendingValidator`.
     pub fn build(comptime fork: ForkSeq, allocator: Allocator, state: *BeaconState(fork)) !PendingDepositsLookup {
         var lookup = PendingDepositsLookup.buildEmpty(allocator);
         errdefer lookup.deinit();
@@ -54,6 +69,7 @@ pub const PendingDepositsLookup = struct {
         self.deposits_by_pubkey.deinit();
     }
 
+    /// Append a pending deposit to the represented sequence.
     pub fn add(self: *PendingDepositsLookup, pending_deposit: *const PendingDeposit) !void {
         const result = try self.deposits_by_pubkey.getOrPut(pending_deposit.pubkey);
         if (!result.found_existing) {
@@ -62,6 +78,9 @@ pub const PendingDepositsLookup = struct {
         try result.value_ptr.deposits.append(self.allocator, pending_deposit.*);
     }
 
+    /// Returns true if any pending deposit for `pubkey` has a valid BLS deposit signature.
+    /// Memoizes the result so repeated checks for the same pubkey within a block only verify
+    /// deposits that have not already been checked.
     pub fn hasPendingValidator(
         self: *PendingDepositsLookup,
         config: *const BeaconConfig,

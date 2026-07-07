@@ -94,8 +94,7 @@ pub fn isGasLimitTargetCompatible(parent_gas_limit: u64, gas_limit: u64, target_
 pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *BeaconState(.gloas), builder_index: u64) !u64 {
     var pending_balance: u64 = 0;
 
-    var withdrawals = try state.inner.get("builder_pending_withdrawals");
-    try withdrawals.commit();
+    var withdrawals = try state.inner.getReadonly("builder_pending_withdrawals");
     const withdrawals_len = try withdrawals.length();
     var w_it = withdrawals.iteratorReadonly(0);
     for (0..withdrawals_len) |_| {
@@ -105,7 +104,7 @@ pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *Beaco
         }
     }
 
-    var payments = try state.inner.get("builder_pending_payments");
+    var payments = try state.inner.getReadonly("builder_pending_payments");
     const payments_len = ct.gloas.BeaconState.getFieldType("builder_pending_payments").length;
     for (0..payments_len) |i| {
         var p: ct.gloas.BuilderPendingPayment.Type = undefined;
@@ -121,7 +120,7 @@ pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *Beaco
 /// Check if a builder has sufficient balance to cover a bid amount.
 /// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-can_builder_cover_bid
 pub fn canBuilderCoverBid(allocator: Allocator, state: *BeaconState(.gloas), builder_index: u64, bid_amount: u64) !bool {
-    var builders = try state.inner.get("builders");
+    var builders = try state.inner.getReadonly("builders");
     var builder: ct.gloas.Builder.Type = undefined;
     try builders.getValue(allocator, builder_index, &builder);
 
@@ -263,7 +262,7 @@ pub fn isAttestationSameSlotRootCache(root_cache: *RootCache(.gloas), data: *con
 }
 
 pub fn isParentBlockFull(state: *BeaconState(.gloas)) !bool {
-    var bid = try state.inner.get("latest_execution_payload_bid");
+    var bid = try state.inner.getReadonly("latest_execution_payload_bid");
     const bid_block_hash = try bid.getFieldRoot("block_hash");
     const latest_block_hash = try state.inner.getFieldRoot("latest_block_hash");
     return std.mem.eql(u8, bid_block_hash, latest_block_hash);
@@ -315,15 +314,15 @@ pub fn initializePtcWindow(
     epoch_cache: *const EpochCache,
     state: *BeaconState(fork),
 ) ![ct.gloas.PtcWindow.length][ct.gloas.PtcWindow.Element.length]ValidatorIndex {
-    const PtcSize = ct.gloas.PtcWindow.Element.length;
-    const PtcWindowLen = ct.gloas.PtcWindow.length;
+    const ptc_size = ct.gloas.PtcWindow.Element.length;
+    const ptc_window_len = ct.gloas.PtcWindow.length;
 
-    const empty_previous_epoch = [_][PtcSize]ValidatorIndex{
-        [_]ValidatorIndex{0} ** PtcSize,
+    const empty_previous_epoch = [_][ptc_size]ValidatorIndex{
+        [_]ValidatorIndex{0} ** ptc_size,
     } ** preset.SLOTS_PER_EPOCH;
 
     const current_epoch = computeEpochAtSlot(try state.slot());
-    var current_and_lookahead: [(1 + preset.MIN_SEED_LOOKAHEAD) * preset.SLOTS_PER_EPOCH][PtcSize]ValidatorIndex = undefined;
+    var ptcs: [(1 + preset.MIN_SEED_LOOKAHEAD) * preset.SLOTS_PER_EPOCH][ptc_size]ValidatorIndex = undefined;
     for (0..1 + preset.MIN_SEED_LOOKAHEAD) |epoch_offset| {
         const epoch = current_epoch + epoch_offset;
         const epoch_committees = try computePayloadTimelinessCommitteesForEpoch(
@@ -334,14 +333,14 @@ pub fn initializePtcWindow(
             epoch_cache,
         );
         for (0..preset.SLOTS_PER_EPOCH) |slot_index| {
-            current_and_lookahead[epoch_offset * preset.SLOTS_PER_EPOCH + slot_index] = epoch_committees[slot_index];
+            ptcs[epoch_offset * preset.SLOTS_PER_EPOCH + slot_index] = epoch_committees[slot_index];
         }
     }
 
-    // return empty_previous_epoch + current_and_lookahead
-    var ptc_window: [PtcWindowLen][PtcSize]ValidatorIndex = undefined;
+    // return empty_previous_epoch + ptcs
+    var ptc_window: [ptc_window_len][ptc_size]ValidatorIndex = undefined;
     @memcpy(ptc_window[0..preset.SLOTS_PER_EPOCH], &empty_previous_epoch);
-    @memcpy(ptc_window[preset.SLOTS_PER_EPOCH..], &current_and_lookahead);
+    @memcpy(ptc_window[preset.SLOTS_PER_EPOCH..], &ptcs);
 
     return ptc_window;
 }

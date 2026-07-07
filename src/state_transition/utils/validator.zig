@@ -74,6 +74,7 @@ pub fn getActivationExitChurnLimit(epoch_cache: *const EpochCache) u64 {
     return @min(epoch_cache.config.chain.MAX_PER_EPOCH_ACTIVATION_EXIT_CHURN_LIMIT, getBalanceChurnLimitFromCache(epoch_cache));
 }
 
+/// https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/gloas/beacon-chain.md#new-get_activation_churn_limit
 pub fn getGloasActivationChurnLimit(epoch_cache: *const EpochCache) u64 {
     const churn = getBalanceChurnLimit(
         epoch_cache.total_active_balance_increments,
@@ -83,6 +84,7 @@ pub fn getGloasActivationChurnLimit(epoch_cache: *const EpochCache) u64 {
     return @min(epoch_cache.config.chain.MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT_GLOAS, churn);
 }
 
+/// https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/gloas/beacon-chain.md#new-get_exit_churn_limit
 pub fn getGloasExitChurnLimit(epoch_cache: *const EpochCache) u64 {
     return getBalanceChurnLimit(
         epoch_cache.total_active_balance_increments,
@@ -91,6 +93,8 @@ pub fn getGloasExitChurnLimit(epoch_cache: *const EpochCache) u64 {
     );
 }
 
+/// Spec (electra): get_consolidation_churn_limit (uses combined balance churn minus activation+exit churn)
+/// Spec (gloas): get_consolidation_churn_limit (independent quotient, no MIN floor)
 pub fn getConsolidationChurnLimit(comptime fork: ForkSeq, epoch_cache: *const EpochCache) u64 {
     if (comptime fork.gte(.gloas)) {
         return getBalanceChurnLimit(
