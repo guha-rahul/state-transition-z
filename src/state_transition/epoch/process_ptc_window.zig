@@ -10,6 +10,12 @@ const computeStartSlotAtEpoch = @import("../utils/epoch.zig").computeStartSlotAt
 const computePtc = @import("../utils/gloas.zig").computePtc;
 const ValidatorIndex = ct.primitive.ValidatorIndex.Type;
 
+/// Update the `ptc_window` field in the beacon state by shifting out the oldest epoch's
+/// PTC entries and appending newly computed entries for the next lookahead epoch.
+/// Stashes the computed PTCs in the transition cache for finalProcessEpoch to shift
+/// into the epoch cache without reading from state.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.4/specs/gloas/beacon-chain.md#new-process_ptc_window
 pub fn processPtcWindow(
     allocator: Allocator,
     epoch_cache: *const EpochCache,

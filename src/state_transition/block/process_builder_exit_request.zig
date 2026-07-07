@@ -9,6 +9,13 @@ const getPendingBalanceToWithdrawForBuilder = gloas_utils.getPendingBalanceToWit
 const initiateBuilderExit = gloas_utils.initiateBuilderExit;
 const isActiveBuilder = gloas_utils.isActiveBuilder;
 
+/// Apply a builder exit request. Authorizes the exit via `source_address` (the builder's
+/// execution_address), not the BLS key — mirroring EIP-7002's 0x01 credential exit.
+///
+/// Drops the request silently if any precondition fails; the EL has already dequeued it
+/// deterministically, so the fee is forfeited but `requests_hash` agreement is unaffected.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.11/specs/gloas/beacon-chain.md#new-process_builder_exit_request
 pub fn processBuilderExitRequest(
     allocator: Allocator,
     config: *const BeaconConfig,

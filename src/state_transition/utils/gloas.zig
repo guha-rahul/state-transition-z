@@ -43,22 +43,34 @@ fn hasBuilderIndexFlag(index: u64) bool {
     return (index & c.BUILDER_INDEX_FLAG) != 0;
 }
 
+/// Check if a validator index represents a builder (has the builder flag set).
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-is_builder_index
 pub fn isBuilderIndex(validator_index: u64) bool {
     return hasBuilderIndexFlag(validator_index);
 }
 
+/// Convert a builder index to a flagged validator index for use in Withdrawal containers.
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-convert_builder_index_to_validator_index
 pub fn convertBuilderIndexToValidatorIndex(builder_index: u64) u64 {
     return if (hasBuilderIndexFlag(builder_index)) builder_index else builder_index | c.BUILDER_INDEX_FLAG;
 }
 
+/// Convert a flagged validator index back to a builder index.
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-convert_validator_index_to_builder_index
 pub fn convertValidatorIndexToBuilderIndex(validator_index: u64) u64 {
     return if (hasBuilderIndexFlag(validator_index)) validator_index & ~c.BUILDER_INDEX_FLAG else validator_index;
 }
 
+/// Check if a builder is active (deposited and not yet withdrawable).
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#isactivebuilder
 pub fn isActiveBuilder(builder: *const ct.gloas.Builder.Type, finalized_epoch: u64) bool {
     return builder.deposit_epoch < finalized_epoch and builder.withdrawable_epoch == c.FAR_FUTURE_EPOCH;
 }
 
+/// Compute the gas limit that satisfies the EIP-1559 adjustment rule from `parent_gas_limit`,
+/// clamping `target_gas_limit` into the allowed window of `±max(parent_gas_limit / 1024, 1) - 1`.
+///
+/// From https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md
 pub fn getExpectedGasLimit(parent_gas_limit: u64, target_gas_limit: u64) u64 {
     const max_gas_limit_difference = @max(parent_gas_limit / 1024, 1) - 1;
 
@@ -69,10 +81,16 @@ pub fn getExpectedGasLimit(parent_gas_limit: u64, target_gas_limit: u64) u64 {
     return parent_gas_limit - @min(parent_gas_limit - target_gas_limit, max_gas_limit_difference);
 }
 
+/// Check if `gas_limit` is compatible with `target_gas_limit` under the EIP-1559 transition rule
+/// from `parent_gas_limit`. The bid must hit `target_gas_limit` when the target is within one
+/// adjustment step of the parent, otherwise it must hit the clamped boundary.
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.8/specs/gloas/builder.md#new-is_gas_limit_target_compatible
 pub fn isGasLimitTargetCompatible(parent_gas_limit: u64, gas_limit: u64, target_gas_limit: u64) bool {
     return gas_limit == getExpectedGasLimit(parent_gas_limit, target_gas_limit);
 }
 
+/// Get the total pending balance to withdraw for a builder (from withdrawals + payments).
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-get_pending_balance_to_withdraw_for_builder
 pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *BeaconState(.gloas), builder_index: u64) !u64 {
     var pending_balance: u64 = 0;
 
@@ -100,6 +118,8 @@ pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *Beaco
     return pending_balance;
 }
 
+/// Check if a builder has sufficient balance to cover a bid amount.
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-can_builder_cover_bid
 pub fn canBuilderCoverBid(allocator: Allocator, state: *BeaconState(.gloas), builder_index: u64, bid_amount: u64) !bool {
     var builders = try state.inner.get("builders");
     var builder: ct.gloas.Builder.Type = undefined;
@@ -112,6 +132,8 @@ pub fn canBuilderCoverBid(allocator: Allocator, state: *BeaconState(.gloas), bui
     return builder.balance - min_balance >= bid_amount;
 }
 
+/// Initiate a builder exit by setting their withdrawable epoch.
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.1/specs/gloas/beacon-chain.md#new-initiate_builder_exit
 pub fn initiateBuilderExit(config: *const BeaconConfig, state: *BeaconState(.gloas), allocator: Allocator, builder_index: u64) !void {
     var builders = try state.inner.get("builders");
     var builder: ct.gloas.Builder.Type = undefined;
@@ -124,6 +146,10 @@ pub fn initiateBuilderExit(config: *const BeaconConfig, state: *BeaconState(.glo
     try builders.setValue(builder_index, &builder);
 }
 
+/// Find the index of a builder by their public key.
+/// Returns null if not found.
+///
+/// May consider builder pubkey cache if performance becomes an issue.
 pub fn findBuilderIndexByPubkey(allocator: Allocator, state: *BeaconState(.gloas), pubkey: *const BLSPubkey) !?usize {
     var builders = try state.inner.get("builders");
     const len = try builders.length();
@@ -135,6 +161,10 @@ pub fn findBuilderIndexByPubkey(allocator: Allocator, state: *BeaconState(.gloas
     return null;
 }
 
+/// Add a new builder to the builders registry. Reuses slots from exited and fully withdrawn
+/// builders when available, otherwise appends.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.11/specs/gloas/beacon-chain.md#new-add_builder_to_registry
 pub fn addBuilderToRegistry(
     allocator: Allocator,
     state: *BeaconState(.gloas),
@@ -175,6 +205,12 @@ pub fn addBuilderToRegistry(
     }
 }
 
+/// Verify the proof of possession on a builder deposit request.
+///
+/// The dedicated `DOMAIN_BUILDER_DEPOSIT` (vs the validator `DOMAIN_DEPOSIT`) prevents replay
+/// of validator deposit signatures against the builder deposit contract and vice versa.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.11/specs/gloas/beacon-chain.md#new-is_valid_builder_deposit_signature
 pub fn isValidBuilderDepositSignature(
     config: *const BeaconConfig,
     pubkey: *const BLSPubkey,

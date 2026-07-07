@@ -13,6 +13,9 @@ const processBuilderDepositRequest = @import("./process_builder_deposit_request.
 const processBuilderExitRequest = @import("./process_builder_exit_request.zig").processBuilderExitRequest;
 const computeEpochAtSlot = @import("../utils/epoch.zig").computeEpochAtSlot;
 
+/// Process parent execution payload effects as the first step of processBlock.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/gloas/beacon-chain.md#new-process_parent_execution_payload
 pub fn processParentExecutionPayload(
     allocator: Allocator,
     config: *const BeaconConfig,
@@ -41,6 +44,13 @@ pub fn processParentExecutionPayload(
     try applyParentExecutionPayload(allocator, config, epoch_cache, state, requests, &parent_bid);
 }
 
+/// Process the parent's execution requests, queue the builder payment, update payload availability,
+/// and update the latest block hash.
+///
+/// Called from processParentExecutionPayload during block processing, and from the validator during
+/// block production before computing withdrawals.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/gloas/beacon-chain.md#new-apply_parent_execution_payload
 pub fn applyParentExecutionPayload(
     allocator: Allocator,
     config: *const BeaconConfig,
@@ -94,6 +104,10 @@ pub fn applyParentExecutionPayload(
     try state.inner.setValue("latest_block_hash", &parent_bid.block_hash);
 }
 
+/// Settle a builder payment at the given index: move its withdrawal (if any) to the
+/// pending withdrawals list and clear the payment slot.
+///
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.6/specs/gloas/beacon-chain.md#new-settle_builder_payment
 fn settleBuilderPayment(allocator: Allocator, state: *BeaconState(.gloas), payment_index: u64) !void {
     var builder_pending_payments = try state.inner.get("builder_pending_payments");
     if (payment_index >= 2 * preset.SLOTS_PER_EPOCH) return error.InvalidBuilderPendingPaymentIndex;

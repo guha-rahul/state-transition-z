@@ -20,6 +20,7 @@ const isBuilderWithdrawalCredential = gloas_utils.isBuilderWithdrawalCredential;
 const initializePtcWindow = gloas_utils.initializePtcWindow;
 const PendingDepositsLookup = @import("../utils/pending_deposits_lookup.zig").PendingDepositsLookup;
 
+/// Upgrade a state from Fulu to Gloas.
 pub fn upgradeStateToGloas(
     allocator: Allocator,
     config: *const BeaconConfig,
@@ -64,6 +65,8 @@ pub fn upgradeStateToGloas(
     return state;
 }
 
+/// Applies any pending deposits for builders to onboard builders during the fork transition
+/// Spec: https://github.com/ethereum/consensus-specs/blob/v1.7.0-alpha.8/specs/gloas/fork.md#new-onboard_builders_from_pending_deposits
 fn onboardBuildersFromPendingDeposits(
     allocator: Allocator,
     config: *const BeaconConfig,
