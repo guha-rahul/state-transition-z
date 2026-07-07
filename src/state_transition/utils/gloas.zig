@@ -98,7 +98,7 @@ pub fn getPendingBalanceToWithdrawForBuilder(allocator: Allocator, state: *Beaco
     const withdrawals_len = try withdrawals.length();
     var w_it = withdrawals.iteratorReadonly(0);
     for (0..withdrawals_len) |_| {
-        const w = try w_it.nextValue(allocator);
+        const w = try w_it.nextValue();
         if (w.builder_index == builder_index) {
             pending_balance += w.amount;
         }

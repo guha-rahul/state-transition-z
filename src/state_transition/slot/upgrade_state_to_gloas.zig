@@ -84,7 +84,7 @@ fn onboardBuildersFromPendingDeposits(
     var pending_it = pending_deposits.iteratorReadonly(0);
 
     for (0..pending_deposits_len) |_| {
-        const deposit = try pending_it.nextValue(allocator);
+        const deposit = try pending_it.nextValue();
 
         const validator_index = epoch_cache.getValidatorIndex(&deposit.pubkey);
         if (try isValidatorKnown(.gloas, state, validator_index)) {

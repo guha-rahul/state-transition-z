@@ -59,7 +59,7 @@ pub const PendingDepositsLookup = struct {
         var pending_it = pending_deposits.iteratorReadonly(0);
 
         for (0..pending_deposits_len) |_| {
-            const pending_deposit = try pending_it.nextValue(allocator);
+            const pending_deposit = try pending_it.nextValue();
             try lookup.add(&pending_deposit);
         }
 

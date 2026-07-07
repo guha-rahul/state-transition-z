@@ -282,7 +282,7 @@ fn getPendingPartialWithdrawals(
     // EIP-7002: Execution layer triggerable withdrawals
     var processed_count: usize = 0;
     for (0..pending_partial_withdrawals_len) |_| {
-        const withdrawal = try pending_partial_withdrawals_it.nextValue(undefined);
+        const withdrawal = try pending_partial_withdrawals_it.nextValue();
         if (withdrawal.withdrawable_epoch > epoch or pending_partial_withdrawals_result.items.len + num_prior_withdrawals >= partial_withdrawal_bound) {
             break;
         }
@@ -423,7 +423,7 @@ fn getBuilderWithdrawals(
         const all_withdrawals = prior_withdrawals_len + builder_withdrawals.items.len;
         if (all_withdrawals >= withdrawals_limit) break;
 
-        const bw = try bw_it.nextValue(allocator);
+        const bw = try bw_it.nextValue();
         const builder_index = bw.builder_index;
 
         // Get builder balance (from builder.balance, not state.balances)

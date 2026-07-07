@@ -37,6 +37,7 @@ pub const Operation = enum {
     proposer_slashing,
     sync_aggregate,
     voluntary_exit,
+    voluntary_exit_churn,
     withdrawal_request,
     withdrawals,
 
@@ -46,6 +47,7 @@ pub const Operation = enum {
             .bls_to_execution_change => "address_change",
             .execution_payload => "body",
             .parent_execution_payload => "block",
+            .voluntary_exit_churn => "voluntary_exit",
             .withdrawals => "execution_payload",
             else => @tagName(self),
         };
@@ -69,6 +71,7 @@ pub const Operation = enum {
             .proposer_slashing => "ProposerSlashing",
             .sync_aggregate => "SyncAggregate",
             .voluntary_exit => "SignedVoluntaryExit",
+            .voluntary_exit_churn => "SignedVoluntaryExit",
             .withdrawal_request => "WithdrawalRequest",
             .withdrawals => "ExecutionPayload",
         };
@@ -297,7 +300,7 @@ pub fn TestCase(comptime fork: ForkSeq, comptime operation: Operation) type {
                         verify,
                     );
                 },
-                .voluntary_exit => {
+                .voluntary_exit, .voluntary_exit_churn => {
                     const config = cached_state.config;
                     const epoch_cache = cached_state.epoch_cache;
                     try state_transition.processVoluntaryExit(
