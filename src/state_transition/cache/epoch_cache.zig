@@ -61,7 +61,7 @@ fn getPtcWindowEpochCacheData(state: *AnyBeaconState) !PtcWindowEpochCacheData {
 }
 
 fn getPtcWindowEpochCacheDataFromState(state: *BeaconState(.gloas)) !PtcWindowEpochCacheData {
-    var ptc_window = try state.inner.get("ptc_window");
+    var ptc_window = try state.inner.getReadonly("ptc_window");
     var data: PtcWindowEpochCacheData = undefined;
 
     for (0..preset.SLOTS_PER_EPOCH) |i| {

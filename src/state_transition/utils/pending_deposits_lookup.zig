@@ -23,30 +23,35 @@ const PendingDeposit = ct.electra.PendingDeposit.Type;
 
 pub const PendingDepositsLookup = struct {
     allocator: Allocator,
-    deposits_by_pubkey: std.AutoHashMap(BLSPubkey, PendingDeposits),
+    deposits_by_pubkey: std.AutoHashMapUnmanaged(BLSPubkey, PendingDeposits),
+    validation_cache: std.AutoHashMapUnmanaged(BLSPubkey, PendingDepositsValidation),
 
     const PendingDeposits = struct {
         deposits: std.ArrayList(PendingDeposit) = .empty,
-        validated_count: usize = 0,
-        has_valid_signature: bool = false,
 
         fn deinit(self: *PendingDeposits, allocator: Allocator) void {
             self.deposits.deinit(allocator);
         }
     };
 
+    const PendingDepositsValidation = struct {
+        has_valid_signature: bool,
+        validated_count: usize,
+    };
+
     /// Build an empty lookup for a sequence that will be populated incrementally.
-    pub fn buildEmpty(allocator: Allocator) PendingDepositsLookup {
+    pub fn init(allocator: Allocator) PendingDepositsLookup {
         return .{
             .allocator = allocator,
-            .deposits_by_pubkey = std.AutoHashMap(BLSPubkey, PendingDeposits).init(allocator),
+            .deposits_by_pubkey = .empty,
+            .validation_cache = .empty,
         };
     }
 
     /// Build a pubkey -> pending-deposits lookup from `state.pendingDeposits`.
     /// No BLS work is done here; signature verification happens lazily in `hasPendingValidator`.
-    pub fn build(comptime fork: ForkSeq, allocator: Allocator, state: *BeaconState(fork)) !PendingDepositsLookup {
-        var lookup = PendingDepositsLookup.buildEmpty(allocator);
+    pub fn initFromState(comptime fork: ForkSeq, allocator: Allocator, state: *BeaconState(fork)) !PendingDepositsLookup {
+        var lookup = PendingDepositsLookup.init(allocator);
         errdefer lookup.deinit();
 
         var pending_deposits = try state.pendingDeposits();
@@ -66,12 +71,13 @@ pub const PendingDepositsLookup = struct {
         while (value_iterator.next()) |entry| {
             entry.deinit(self.allocator);
         }
-        self.deposits_by_pubkey.deinit();
+        self.deposits_by_pubkey.deinit(self.allocator);
+        self.validation_cache.deinit(self.allocator);
     }
 
     /// Append a pending deposit to the represented sequence.
     pub fn add(self: *PendingDepositsLookup, pending_deposit: *const PendingDeposit) !void {
-        const result = try self.deposits_by_pubkey.getOrPut(pending_deposit.pubkey);
+        const result = try self.deposits_by_pubkey.getOrPut(self.allocator, pending_deposit.pubkey);
         if (!result.found_existing) {
             result.value_ptr.* = .{};
         }
@@ -79,18 +85,24 @@ pub const PendingDepositsLookup = struct {
     }
 
     /// Returns true if any pending deposit for `pubkey` has a valid BLS deposit signature.
-    /// Memoizes the result so repeated checks for the same pubkey within a block only verify
-    /// deposits that have not already been checked.
+    /// Memoizes the result in `validation_cache` so repeated checks for the same pubkey
+    /// within a block only verify deposits that have not already been checked.
     pub fn hasPendingValidator(
         self: *PendingDepositsLookup,
         config: *const BeaconConfig,
         pubkey: *const BLSPubkey,
     ) !bool {
-        const entry = self.deposits_by_pubkey.getPtr(pubkey.*) orelse return false;
-        if (entry.has_valid_signature) return true;
-        if (entry.validated_count == entry.deposits.items.len) return false;
+        const validation = self.validation_cache.get(pubkey.*);
+        if (validation) |v| {
+            if (v.has_valid_signature) return true;
+        }
 
-        var i = entry.validated_count;
+        const entry = self.deposits_by_pubkey.getPtr(pubkey.*) orelse return false;
+
+        const start_index = if (validation) |v| v.validated_count else 0;
+        if (start_index == entry.deposits.items.len) return false;
+
+        var i = start_index;
         while (i < entry.deposits.items.len) : (i += 1) {
             const deposit = &entry.deposits.items[i];
             validateDepositSignature(
@@ -100,12 +112,17 @@ pub const PendingDepositsLookup = struct {
                 deposit.amount,
                 deposit.signature,
             ) catch continue;
-            entry.has_valid_signature = true;
-            entry.validated_count = i + 1;
+            try self.validation_cache.put(self.allocator, pubkey.*, .{
+                .has_valid_signature = true,
+                .validated_count = i + 1,
+            });
             return true;
         }
 
-        entry.validated_count = entry.deposits.items.len;
+        try self.validation_cache.put(self.allocator, pubkey.*, .{
+            .has_valid_signature = false,
+            .validated_count = entry.deposits.items.len,
+        });
         return false;
     }
 };

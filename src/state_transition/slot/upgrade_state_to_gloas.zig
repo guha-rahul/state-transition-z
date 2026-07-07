@@ -76,7 +76,7 @@ fn onboardBuildersFromPendingDeposits(
     var remaining_pending_deposits: std.ArrayList(PendingDeposit) = .empty;
     defer remaining_pending_deposits.deinit(allocator);
 
-    var pending_deposits_lookup = PendingDepositsLookup.buildEmpty(allocator);
+    var pending_deposits_lookup = PendingDepositsLookup.init(allocator);
     defer pending_deposits_lookup.deinit();
 
     var pending_deposits = try state.pendingDeposits();
