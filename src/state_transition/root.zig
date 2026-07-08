@@ -92,6 +92,9 @@ pub const isExecutionEnabled = @import("./utils/execution.zig").isExecutionEnabl
 pub const isMergeTransitionComplete = @import("./utils/execution.zig").isMergeTransitionComplete;
 pub const getRandaoMix = @import("./utils/seed.zig").getRandaoMix;
 pub const getEffectiveBalanceIncrementsZeroInactive = @import("./utils/balance.zig").getEffectiveBalanceIncrementsZeroInactive;
+pub const getStateSlotFromBytes = @import("ssz_bytes.zig").getStateSlotFromBytes;
+pub const getLastProcessedSlotFromStateBytes = @import("ssz_bytes.zig").getLastProcessedSlotFromStateBytes;
+pub const STATE_SLOTS_PREFIX_LEN = @import("ssz_bytes.zig").STATE_SLOTS_PREFIX_LEN;
 
 pub const WithdrawalsResult = @import("./block/process_withdrawals.zig").WithdrawalsResult;
 
@@ -127,4 +130,5 @@ test {
     testing.refAllDecls(load_state);
     testing.refAllDecls(sync_committees_witness);
     testing.refAllDecls(weak_subjectivity);
+    testing.refAllDecls(@import("ssz_bytes.zig"));
 }
