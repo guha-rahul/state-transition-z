@@ -148,7 +148,17 @@ pub fn ArrayCompositeTreeView(comptime ST: type) type {
             return self.chunks.getAllValues(allocator, length);
         }
 
-        pub fn getValuesByRangeInto(self: *Self, allocator: Allocator, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+        pub const getValuesByRangeInto = if (isFixedType(ST.Element))
+            getValuesByRangeIntoFixed
+        else
+            getValuesByRangeIntoAlloc;
+
+        fn getValuesByRangeIntoFixed(self: *Self, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
+            if (start_index > length or out.len > length - start_index) return error.IndexOutOfBounds;
+            return self.chunks.getValuesByRangeInto(start_index, out);
+        }
+
+        fn getValuesByRangeIntoAlloc(self: *Self, allocator: Allocator, start_index: usize, out: []ST.Element.Type) ![]ST.Element.Type {
             if (start_index > length or out.len > length - start_index) return error.IndexOutOfBounds;
             return self.chunks.getValuesByRangeInto(allocator, start_index, out);
         }
@@ -266,13 +276,13 @@ test "TreeView vector composite getValuesByRangeInto reads values without changi
     defer view.deinit();
 
     var out: [2]Inner.Type = undefined;
-    _ = try view.getValuesByRangeInto(undefined, 1, out[0..]);
+    _ = try view.getValuesByRangeInto(1, out[0..]);
 
     try std.testing.expectEqual(@as(u64, 2), out[0].x);
     try std.testing.expectEqual(@as(u64, 3), out[1].x);
     try std.testing.expectEqual(@as(usize, 0), view.chunks.state.changed.count());
 
-    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(undefined, 3, out[0..]));
+    try std.testing.expectError(error.IndexOutOfBounds, view.getValuesByRangeInto(3, out[0..]));
 }
 
 test "TreeView vector composite clearCache does not break subsequent commits" {
